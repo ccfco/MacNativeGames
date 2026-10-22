@@ -201,10 +201,13 @@ static void attach_keyboard(GCKeyboard *keyboard) {
     fprintf(stderr, "[totk-input] hardware keyboard connected: %s\n", (keyboard.vendorName ?: @"keyboard").UTF8String);
 }
 static void detach_keyboard(GCKeyboard *keyboard) {
-    if (keyboardPad != keyboard) return;
-    keyboard.keyboardInput.keyChangedHandler = nil;
+    if (keyboardPad == keyboard) {
+        keyboard.keyboardInput.keyChangedHandler = nil;
+        keyboardPad = nil;
+    }
+    /* Release every key on any keyboard disconnect: a held W/Space must not keep the game walking after the keyboard
+       sleeps or is detached, and the notification's object is not guaranteed to be the one attached. */
     for (unsigned mac = 0; mac < 128; mac++) runtime_input_key(mac, 0);
-    keyboardPad = nil;
     fprintf(stderr, "[totk-input] hardware keyboard disconnected\n");
 }
 #endif

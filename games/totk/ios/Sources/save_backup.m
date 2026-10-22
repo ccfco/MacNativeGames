@@ -93,6 +93,12 @@ static const char *const kDirectoryEnvs[] = {"TOTK_PROFILE_DIR", "TOTK_GAME_SLOT
    bookmark asks again next launch). */
 - (void)explain:(UIViewController *)host choose:(void (^)(void))choose later:(void (^)(void))later {
     if (!host) { later(); return; }
+    __block BOOL answered = NO;
+    void (^finish)(BOOL) = ^(BOOL chose) {
+        if (answered) return;
+        answered = YES;
+        if (chose) choose(); else later();
+    };
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@(TOTK_UI("存档自动备份", "Save backup"))
                                                                    message:@(TOTK_UI(
         "选择一个 iCloud Drive 文件夹，存档会自动备份过去。以后删掉这个 App，存档也还在；重装后选中同一个文件夹即可恢复。",
@@ -101,14 +107,23 @@ static const char *const kDirectoryEnvs[] = {"TOTK_PROFILE_DIR", "TOTK_GAME_SLOT
     [alert addAction:[UIAlertAction actionWithTitle:@(TOTK_UI("选择文件夹", "Choose folder")) style:UIAlertActionStyleDefault
                                             handler:^(UIAlertAction *action) {
         (void)action;
+        if (answered) return;
+        answered = YES;
         /* Presenting while the alert is still dismissing is refused; one run-loop turn after it is gone is enough. */
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), choose);
     }]];
     [alert addAction:[UIAlertAction actionWithTitle:@(TOTK_UI("以后再说", "Later")) style:UIAlertActionStyleCancel
-                                            handler:^(UIAlertAction *action) { (void)action; later(); }]];
+                                            handler:^(UIAlertAction *action) { (void)action; finish(NO); }]];
     [host presentViewController:alert animated:YES completion:^{
-        if (host.presentedViewController != alert) later();   // another presenter won: do not leave the game waiting
+        if (host.presentedViewController != alert) finish(NO);   // another presenter won: do not leave the game waiting
     }];
+    /* Nobody answered (unattended launch, a scene torn down): start the game without a folder rather than block boot. */
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(300 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (answered) return;
+        fprintf(stderr, "[totk-save] backup prompt did not answer in 5 minutes; starting without a backup folder\n");
+        [alert dismissViewControllerAnimated:YES completion:nil];
+        finish(NO);
+    });
 }
 
 - (void)chooseFrom:(UIViewController *)host completion:(void (^)(BOOL))completion {
@@ -270,6 +285,15 @@ static const char *const kDirectoryEnvs[] = {"TOTK_PROFILE_DIR", "TOTK_GAME_SLOT
     if (![files fileExistsAtPath:from.path isDirectory:&directory]) return 0;
     NSError *error = nil;
     if (!directory) {
+        /* account.uid is exactly 16 bytes (runtime/account.c); restoring a partial one would make the app refuse to
+           boot. Never let a torn source replace a good copy, in either direction. */
+        if ([from.lastPathComponent isEqualToString:@"account.uid"]) {
+            NSDictionary *source = [files attributesOfItemAtPath:from.path error:nil];
+            if ([source[NSFileSize] unsignedLongLongValue] != 16) {
+                fprintf(stderr, "[totk-save] skip incomplete %s\n", from.path.UTF8String);
+                return 0;
+            }
+        }
         if (!overwrite && [files fileExistsAtPath:to.path]) return 0;
         if (overwrite) {   // an unchanged file is not copied again every five minutes
             NSDictionary *source = [files attributesOfItemAtPath:from.path error:nil];

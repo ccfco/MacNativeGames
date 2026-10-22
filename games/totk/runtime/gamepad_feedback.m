@@ -16,6 +16,7 @@
 #include <TargetConditionals.h>
 #include <math.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -30,7 +31,7 @@
    -4810). Simple players and AHAP data play fine there (2026-10-17, DualSense, intensity 0). So each handle plays one
    30-second continuous event whose intensity and sharpness follow the game through dynamic parameters, and a fresh
    player takes over after 25 s. */
-enum { RUMBLE_TICK_MS = 10, RUMBLE_STALE_MS = 250, RUMBLE_HOLD_MS = 150, RUMBLE_EVENT_S = 30, RUMBLE_RENEW_MS = 25000 };
+enum { RUMBLE_TICK_MS = 10, RUMBLE_SLOW_MS = 1000, RUMBLE_STALE_MS = 250, RUMBLE_HOLD_MS = 150, RUMBLE_EVENT_S = 30, RUMBLE_RENEW_MS = 25000 };
 static dispatch_queue_t rumbleQueue;
 static dispatch_source_t rumbleTimer;
 static GCController *rumblePad;                     /* rumbleQueue */
@@ -45,6 +46,9 @@ static float want[2][4] = {{0, 160, 0, 320}, {0, 160, 0, 320}};
 static uint64_t wantAt[2], wantCount, wantCountLogged;
 static float strongest;
 static float gain = 1.0f;
+/* Idle rumble ticks once a second instead of 100 times: a connected controller should not keep the CPU waking while
+   the game sends nothing. A new value switches back to 100 Hz. */
+static _Atomic int rumbleSlow;
 
 void runtime_rumble_set(unsigned side, float al, float fl, float ah, float fh) {
     if (side > 1) return;
@@ -52,6 +56,12 @@ void runtime_rumble_set(unsigned side, float al, float fl, float ah, float fh) {
     want[side][0] = al; want[side][1] = fl; want[side][2] = ah; want[side][3] = fh; wantAt[side] = runtime_now_ns(); wantCount++;
     float a = al > ah ? al : ah; if (a > strongest) strongest = a;
     pthread_mutex_unlock(&wantLock);
+    if (a > 0.02f && rumbleQueue && atomic_load_explicit(&rumbleSlow, memory_order_relaxed)) {
+        atomic_store_explicit(&rumbleSlow, 0, memory_order_relaxed);
+        dispatch_async(rumbleQueue, ^{
+            dispatch_source_set_timer(rumbleTimer, dispatch_time(DISPATCH_TIME_NOW, 0), RUMBLE_TICK_MS * NSEC_PER_MSEC, 2 * NSEC_PER_MSEC);
+        });
+    }
 }
 void runtime_feedback_quiet(void) {
     pthread_mutex_lock(&wantLock); wantAt[0] = wantAt[1] = 0; pthread_mutex_unlock(&wantLock);
@@ -135,6 +145,20 @@ static void rumble_tick(void) {   /* rumbleQueue, every 10 ms */
         if (!ensure_engine(side)) continue;
         if (!playing[side] || now - playerSince[side] > RUMBLE_RENEW_MS * 1000000ull) start_player(side, intensity, sharpness, now);
         else if (fabsf(intensity - sentIntensity[side]) > 0.01f || fabsf(sharpness - sentSharpness[side]) > 0.02f) send_params(players[side], side, intensity, sharpness);
+    }
+    BOOL busy = playing[0] || playing[1];
+    for (int side = 0; side < 2; side++) {
+        pthread_mutex_lock(&wantLock); uint64_t at = wantAt[side]; pthread_mutex_unlock(&wantLock);
+        if (at && now - at < RUMBLE_STALE_MS * 1000000ull) busy = YES;
+    }
+    int slow = atomic_load_explicit(&rumbleSlow, memory_order_relaxed);
+    if (busy && slow) {
+        atomic_store_explicit(&rumbleSlow, 0, memory_order_relaxed);
+        dispatch_source_set_timer(rumbleTimer, dispatch_time(DISPATCH_TIME_NOW, 0), RUMBLE_TICK_MS * NSEC_PER_MSEC, 2 * NSEC_PER_MSEC);
+    } else if (!busy && !slow) {
+        atomic_store_explicit(&rumbleSlow, 1, memory_order_relaxed);
+        dispatch_source_set_timer(rumbleTimer, dispatch_time(DISPATCH_TIME_NOW, RUMBLE_SLOW_MS * NSEC_PER_MSEC),
+                                  RUMBLE_SLOW_MS * NSEC_PER_MSEC, 100 * NSEC_PER_MSEC);
     }
     static uint64_t lastLog; if (!lastLog) lastLog = now;
     if (now - lastLog >= 30000000000ull) {
@@ -303,6 +327,10 @@ void runtime_feedback_attach(GCController *c) {   /* main queue */
         });
         GCMotion *m = c.motion;
         if (!m || !m.hasRotationRate) { fprintf(stderr, "[gyro] %s has no gyro: no motion from it\n", name); return; }
+        if (motionPad && motionPad != c) {   /* one motion feed only: two controllers would be mixed into one fusion */
+            motionPad.motion.valueChangedHandler = nil;
+            runtime_motion_live(0);
+        }
         if (m.sensorsRequireManualActivation) m.sensorsActive = YES;
         hid_motion_stop(); zeroSince = 0; motionSeen = hidAsked = NO; runtime_motion_deadzone_default(0);
         m.valueChangedHandler = ^(GCMotion *changed) { motion_sample(changed); };
@@ -315,5 +343,13 @@ void runtime_feedback_detach(GCController *c) {   /* main queue */
         dispatch_async(rumbleQueue, ^{ if (rumblePad == c) { for (int s = 0; s < 2; s++) forget_side(s); rumblePad = nil; } });
     if (motionPad == c) {
         c.motion.valueChangedHandler = nil; hid_motion_stop(); motionPad = nil; runtime_motion_live(0);
+    }
+}
+/* iOS deactivates a manual-activation controller's sensors while the app is in the background (Settings, Control
+   Center); without this, gyro aiming stays dead until the controller reconnects. */
+void runtime_feedback_active(void) {   /* main queue */
+    if (motionPad && motionPad.motion.sensorsRequireManualActivation) {
+        motionPad.motion.sensorsActive = YES;
+        fprintf(stderr, "[gyro] motion sensors reactivated after the app returned\n");
     }
 }

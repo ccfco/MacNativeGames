@@ -38,19 +38,20 @@ void runtime_shortcut_help_toggle(void) {}
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
     static BOOL started; if (started) return; started = YES;
-    /* Playback category (PR #97): plays with the ring / silent switch off and routes to the speaker. Without an active
-       session the game's CoreAudio output stays on a null sink on iOS 27 ("no device sink in use"); activating it in
-       didFinishLaunching blocked the main thread before the log file was opened. Interruptions: audio_observe. */
-    AVAudioSession *audio = AVAudioSession.sharedInstance;
-    NSError *catErr = nil, *actErr = nil;
-    [audio setCategory:AVAudioSessionCategoryPlayback mode:AVAudioSessionModeDefault options:0 error:&catErr];
-    BOOL activated = [audio setActive:YES error:&actErr];
-    fprintf(stderr, "[totk-audio] audio session category=%s active=%d route=%s err=%s%s\n",
-            audio.category.UTF8String ?: "?", (int)activated, audio.currentRoute.outputs.firstObject.portType.UTF8String ?: "?",
-            catErr ? catErr.localizedDescription.UTF8String : "none", actErr ? actErr.localizedDescription.UTF8String : "");
     /* The backup folder (and a fresh install's restore) is settled before the game thread starts: the game opens its
        save as it boots, and restoring under it would race that. Without a bookmark the player picks the folder now. */
     [TOTKSaveBackup prepareFrom:self completion:^{
+        /* Playback category (PR #97): plays with the ring / silent switch off and routes to the speaker. Without an
+           active session the game's CoreAudio output stays on a null sink on iOS 27 ("no device sink in use");
+           activating it in didFinishLaunching blocked the main thread before the log file was opened. Activated here,
+           after the backup prompt, so a picker left open does not interrupt the player's music. */
+        AVAudioSession *audio = AVAudioSession.sharedInstance;
+        NSError *catErr = nil, *actErr = nil;
+        [audio setCategory:AVAudioSessionCategoryPlayback mode:AVAudioSessionModeDefault options:0 error:&catErr];
+        BOOL activated = [audio setActive:YES error:&actErr];
+        fprintf(stderr, "[totk-audio] audio session category=%s active=%d route=%s err=%s%s\n",
+                audio.category.UTF8String ?: "?", (int)activated, audio.currentRoute.outputs.firstObject.portType.UTF8String ?: "?",
+                catErr ? catErr.localizedDescription.UTF8String : "none", actErr ? actErr.localizedDescription.UTF8String : "");
         pthread_attr_t attr; pthread_attr_init(&attr); pthread_attr_setstacksize(&attr, 64u << 20);
         pthread_t thread; pthread_create(&thread, &attr, run_host, NULL);
         pthread_detach(thread); pthread_attr_destroy(&attr);
@@ -102,7 +103,7 @@ static void audio_observe(void) {
 
 /* The Settings app pane is the single source of defaults: register its DefaultValue entries so the game sees the
    same defaults before the player changes anything, then hand every key to the runtime as an environment variable.
-   The pane can be edited freely; new TOTK_* rows work without another key list here. overwrite=0 keeps
+   The pane can be edited freely; a new TOTK_* row with a DefaultValue needs no other key list here. overwrite=0 keeps
    devicectl --environment-variables winning when testing from the Mac. */
 static void apply_settings(void) {
     NSBundle *settings = [NSBundle bundleWithPath:[NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"Settings.bundle"]];
