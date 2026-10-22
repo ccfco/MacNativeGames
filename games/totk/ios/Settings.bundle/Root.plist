@@ -12,7 +12,7 @@
 			<key>Title</key>
 			<string>画面 · Display</string>
 			<key>FooterText</key>
-			<string>先选画质模式，场景细节和帧率再按需调整。重启游戏后生效 · choose a picture mode first; scene detail and frame rate are separate. Takes effect after relaunching</string>
+			<string>先选画质模式，场景分辨率和帧率再按需调整。想更稳：1080p + 1280x720 + 60 帧；想更清晰：MetalFX 2K + 1600x900 + 60 帧。重启游戏后生效 · choose a picture mode first; scene resolution and frame rate are separate. Steadiest: 1080p + 1280x720 + 60 fps; sharpest: MetalFX 2K + 1600x900 + 60 fps. Takes effect after relaunching</string>
 		</dict>
 		<dict>
 			<key>Type</key>
@@ -32,13 +32,13 @@
 			</array>
 			<key>Titles</key>
 			<array>
-				<string>MetalFX 2K（推荐）· MetalFX 2K</string>
-				<string>原生 2K（最清晰，最热）· Native 2K</string>
-				<string>1080p（更凉）· 1080p</string>
-				<string>720p（最省电）· 720p</string>
+				<string>MetalFX 2K（推荐）· MetalFX 2K (recommended)</string>
+				<string>原生 2K（最清晰，最热）· Native 2K (sharpest, hottest)</string>
+				<string>1080p（更凉）· 1080p (cooler)</string>
+				<string>720p（最省电）· 720p (lowest power)</string>
 			</array>
 			<key>FooterText</key>
-			<string>MetalFX 2K：1080p 画布 + 输出放大到面板，文字比 1080p 清楚，60 帧稳定；原生 2K：2420x1668 画布，文字真正原生，3D 仍按场景细节渲染，发热更高。原生 2K 需要构建为这块面板烘焙画布（默认构建面向 11 英寸 M5 iPad）；其他面板自动回退到 MetalFX 2K；1080p / 720p 降低显示缓冲，更凉。 · MetalFX 2K: 1080p canvas upscaled to the panel; Native 2K: a 2420x1668 canvas for native text (3D stays at the scene size; hotter). Native 2K needs a build baked for this panel (the default targets the 11-inch M5 iPad); other panels fall back to MetalFX 2K; 1080p / 720p lower the drawable.</string>
+			<string>MetalFX 2K：默认，1080p 画布用场景和输出两段 MetalFX 放大到面板，文字更清楚；1080p：约 1919x1323 显示缓冲，不做输出 MetalFX，更凉；原生 2K：使用构建时烘焙的画布（默认构建面向 11 英寸 M5 iPad，2420x1668），文字真正原生，3D 仍按场景分辨率渲染，发热最高，其他面板自动回退；720p：更小缓冲，最省电。 · MetalFX 2K: the default, a 1080p canvas upscaled to the panel by both MetalFX stages for clearer text; 1080p: about a 1919x1323 drawable with no output MetalFX, cooler; Native 2K: the canvas baked into this build (the default targets the 11-inch M5 iPad, 2420x1668) for native text (3D stays at the scene resolution; hottest; other panels fall back); 720p: a smaller drawable, lowest power.</string>
 		</dict>
 		<dict>
 			<key>Type</key>
@@ -46,7 +46,7 @@
 			<key>Key</key>
 			<string>TOTK_RENDER_RES</string>
 			<key>Title</key>
-			<string>场景细节 · Scene detail</string>
+			<string>场景分辨率 · Scene resolution</string>
 			<key>DefaultValue</key>
 			<string>1600x900</string>
 			<key>Values</key>
@@ -58,13 +58,13 @@
 			</array>
 			<key>Titles</key>
 			<array>
-				<string>推荐 1600x900 · Recommended</string>
-				<string>清晰 1920x1080（更热）· Sharper</string>
-				<string>流畅 1280x720（更凉）· Cooler</string>
-				<string>最省电 960x540 · Coolest</string>
+				<string>1600x900（推荐）· 1600x900 (recommended)</string>
+				<string>1920x1080（清晰，更热）· 1920x1080 (sharper, hotter)</string>
+				<string>1280x720（流畅，更凉）· 1280x720 (cooler)</string>
+				<string>960x540（最省电）· 960x540 (coolest)</string>
 			</array>
 			<key>FooterText</key>
-			<string>只影响 3D 世界，和画质模式独立。1920x1080 比 1600x900 多 44% 像素，发热明显；1280x720 / 960x540 更省电。 · 3D world only, independent of the picture mode. 1920x1080 renders 44% more pixels and runs hotter; 1280x720 / 960x540 are cooler.</string>
+			<string>只影响 3D 世界，和画质模式独立。1920x1080 比 1600x900 多 44% 像素，发热明显；1280x720 / 960x540 更省电。重场景掉帧时优先降到 1280x720。 · Affects the 3D world only, independent of the picture mode. 1920x1080 renders 44% more pixels and runs hotter; 1280x720 / 960x540 are cooler. If busy areas drop frames, try 1280x720 first.</string>
 		</dict>
 		<dict>
 			<key>Type</key>
@@ -109,10 +109,10 @@
 			<key>Titles</key>
 			<array>
 				<string>填满屏幕 · Fill the screen</string>
-				<string>16:9 · 黑边 · Letterbox</string>
+				<string>16:9（黑边）· 16:9 letterbox</string>
 			</array>
 			<key>FooterText</key>
-			<string>填满屏幕会把 16:9 画面延伸到 iPad 全屏，少数 UI 特效可能偏移（实验性）· fills the iPad screen; a few UI effects may sit off (experimental)</string>
+			<string>填满屏幕不拉伸画面：相机按屏幕比例取景，呈现时再还原比例。iPad 比 16:9 窄，所以两侧会少一点、上下填满；16:9 保留完整宽度并加黑边。少数 UI 特效可能偏移（实验性）· fill does not stretch: the camera takes the screen's aspect and the present pass restores the proportions. An iPad is narrower than 16:9, so a little is lost at the sides and the height is filled; 16:9 keeps the full width with bars. A few UI effects may sit off (experimental)</string>
 		</dict>
 		<dict>
 			<key>Type</key>
@@ -120,7 +120,7 @@
 			<key>Key</key>
 			<string>TOTK_TAA</string>
 			<key>Title</key>
-			<string>边缘平滑（MetalFX 时间性）· Edge smoothing</string>
+			<string>边缘平滑（MetalFX 时间抗锯齿）· Edge smoothing (MetalFX TAA)</string>
 			<key>DefaultValue</key>
 			<false/>
 			<key>FooterText</key>
@@ -140,7 +140,7 @@
 			<key>Key</key>
 			<string>TOTK_HUD_MODE</string>
 			<key>Title</key>
-			<string>屏幕状态 · On-screen status</string>
+			<string>状态行 · Status line</string>
 			<key>DefaultValue</key>
 			<string>all</string>
 			<key>Values</key>
@@ -192,7 +192,7 @@
 			<key>Key</key>
 			<string>TOTK_KEYBOARD</string>
 			<key>Title</key>
-			<string>妙控键盘 · Magic Keyboard</string>
+			<string>键盘 · Keyboard</string>
 			<key>DefaultValue</key>
 			<string>auto</string>
 			<key>Values</key>
@@ -206,7 +206,7 @@
 				<string>关闭</string>
 			</array>
 			<key>FooterText</key>
-			<string>自动检测硬件键盘；关闭后只用触屏和手柄，防止键盘异常时无法操作 · detects a hardware keyboard; off keeps touch and controllers only</string>
+			<string>妙控键盘、智能键盘或蓝牙键盘均可；关闭后只用触屏和手柄，防止键盘异常时无法操作 · works with a Magic Keyboard, Smart Keyboard or Bluetooth keyboard; off keeps touch and controllers only</string>
 		</dict>
 		<dict>
 			<key>Type</key>
@@ -236,7 +236,19 @@
 			<key>DefaultValue</key>
 			<true/>
 			<key>FooterText</key>
-			<string>首次启用时 App 会让你选择一个 iCloud Drive 文件夹；save 和 game-slot 会自动镜像过去，删 App 也不会丢 · the app asks for an iCloud Drive folder once; save and game-slot are mirrored there and survive deleting the app</string>
+			<string>默认开启。首次启动会提示选择一次 iCloud Drive 文件夹；save 和 game-slot 会自动镜像过去，删 App 也不会丢。选「以后再说」后不再自动提示；要换文件夹，打开下面的开关。 · on by default. The first launch asks once for an iCloud Drive folder; save and game-slot are mirrored there and survive deleting the app. “Later” is remembered, so it does not ask again; to change the folder, turn on the switch below.</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSToggleSwitchSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_BACKUP_RECONFIGURE</string>
+			<key>Title</key>
+			<string>重新选择备份文件夹 · Choose the backup folder again</string>
+			<key>DefaultValue</key>
+			<false/>
+			<key>FooterText</key>
+			<string>打开后，下次启动游戏会清除当前文件夹并重新选择；随后开关自动关闭。 · at the next launch the app forgets the current folder and asks again; the switch then turns itself off.</string>
 		</dict>
 		<dict>
 			<key>Type</key>

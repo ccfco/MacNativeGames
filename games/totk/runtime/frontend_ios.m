@@ -94,8 +94,9 @@ void runtime_ios_attach_layer(CAMetalLayer *layer,UIView *host){
  metalLayer=layer;metalLayer.device=MTLCreateSystemDefaultDevice();metalLayer.pixelFormat=MTLPixelFormatBGRA8Unorm;metalLayer.framebufferOnly=NO;
  CGFloat s=host.window.screen.nativeScale>0?host.window.screen.nativeScale:UIScreen.mainScreen.nativeScale;
  metalLayer.contentsScale=s;
- /* TOTK_IOS_DRAWABLE_H (Root.plist's default 1080; 0 = native pixels): build the drawable this many pixels tall at the view's aspect, so the
-    game picture (1920x1080 canvas) lands about 1:1 and the system compositor scales it to the screen instead of our GPU. */
+ /* TOTK_IOS_DRAWABLE_H (set by main.m from the picture mode; 0 = native pixels): build the drawable this many pixels
+    tall at the view's aspect, so the game picture (1920x1080 canvas) lands about 1:1 and the system compositor scales
+    it to the screen instead of our GPU. The 1080 fallback keeps a launch without Settings on the old default. */
  double vw=round(host.bounds.size.width*s),vh=round(host.bounds.size.height*s);
  const char *dh=getenv("TOTK_IOS_DRAWABLE_H");long want=dh?strtol(dh,NULL,10):1080;
  /* the 16:9 picture should get about want rows: a screen narrower than 16:9 (an iPad, about 4:3; 2026-10-17) holds it by

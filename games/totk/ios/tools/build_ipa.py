@@ -33,8 +33,10 @@ def pane_scene_sizes(ios):
     for item in spec.get('PreferenceSpecifiers',[]):
         if item.get('Key')!='TOTK_RENDER_RES': continue
         for value in item.get('Values',[]):
+            if not isinstance(value,str):
+                raise RuntimeError(f'TOTK_RENDER_RES value {value!r} is not a string')
             try: w,h=(int(v) for v in value.lower().split('x'))
-            except ValueError: continue
+            except ValueError: raise RuntimeError(f'TOTK_RENDER_RES value {value!r} is not <width>x<height>')
             if w*h>1600*900: yield f'{w}x{h}'
 
 def main():
@@ -44,19 +46,27 @@ def main():
     p.add_argument('--app-name',default='Tears of the Kingdom');p.add_argument('--bundle-id',default='org.macnativegames.totk')
     # Native 2K on iPad: the game code is baked for this canvas at export and the Settings pane may start in it.
     # 0 disables it; the pane's native option then falls back to MetalFX 2K at launch. Only 1.4.3 has the HeapDef patch.
-    p.add_argument('--canvas',default='2420x1668',help='native-2K canvas as <width>x<height>, or 0 (1.4.3 only)')
+    p.add_argument('--canvas',default=None,help='native-2K canvas as <width>x<height>, or 0 (default: 2420x1668 on 1.4.3, 0 otherwise)')
+    p.add_argument('--heapdef',type=Path,default=None,help='a mod HeapDef.byml.zs to fold into the overlays (build_app passes it)')
     a=p.parse_args(); tree=a.tree.resolve(); ios=tree/'ios';gen=ios/'Gen';logs=a.logs.resolve(); out=a.out.resolve()
+    canvas_arg=a.canvas if a.canvas is not None else ('2420x1668' if a.version=='v143' else '0')
+    if a.version!='v143' and canvas_arg not in ('0',''):
+        raise RuntimeError('--canvas needs 1.4.3 (the HeapDef patch)')
     canvas=None
-    if a.version=='v143' and a.canvas and a.canvas!='0':
-        try: cw,ch=(int(v) for v in a.canvas.lower().split('x'))
+    if a.version=='v143' and canvas_arg and canvas_arg!='0':
+        try: cw,ch=(int(v) for v in canvas_arg.lower().split('x'))
         except ValueError: raise RuntimeError('--canvas must be <width>x<height> or 0')
-        if not (640<=cw<=7680 and 360<=ch<=4320): raise RuntimeError('--canvas size out of range')
+        # A panel read from UIScreen.nativeBounds arrives in portrait order; the baked canvas is always landscape.
+        cw,ch=max(cw,ch),min(cw,ch)
+        if not (1920<=cw<=7680 and 1080<=ch<=4320):
+            raise RuntimeError('--canvas must be at least 1920x1080 and at most 7680x4320')
         canvas=(cw,ch)
+    if a.heapdef and not a.heapdef.is_file(): raise RuntimeError(f'missing HeapDef: {a.heapdef}')
     if out.suffix.lower()!='.ipa': raise RuntimeError('iOS output path must end in .ipa')
     # Required by the asset catalog below: fail before the export and shader seed, not after them.
     if not (tree/'build/AppIcon.icns').is_file(): raise RuntimeError(f'missing app icon: {tree/"build/AppIcon.icns"}; build_app.py extracts it from the control data')
     env=dict(os.environ,DEVELOPER_DIR=developer_dir())
-    sdk=subprocess.check_output(['xcrun','--sdk','iphoneos','--show-sdk-path'],env=env,text=True).strip()
+    subprocess.check_output(['xcrun','--sdk','iphoneos','--show-sdk-path'],env=env,text=True)
     subprocess.run(['xcodebuild','-version'],env=env,check=True,stdout=subprocess.DEVNULL)
     if not shutil.which('xcodegen'): raise RuntimeError('install xcodegen: brew install xcodegen')
     gen.mkdir(parents=True,exist_ok=True)
@@ -67,12 +77,21 @@ def main():
         f'#define TOTK_IOS_CANVAS_BAKED {1 if canvas else 0}\n'
         f'#define TOTK_IOS_CANVAS_W {canvas[0] if canvas else 0}\n'
         f'#define TOTK_IOS_CANVAS_H {canvas[1] if canvas else 0}\n')
+    scenes=list(dict.fromkeys(pane_scene_sizes(ios)))
+    def overlay(cw,ch,scene):
+        name=f'{cw}x{ch}'+(f'-scene-{scene}' if scene else '')
+        cmd=[sys.executable,tree/'scripts/make_output_res_overlay.py',f'{cw}x{ch}','--version',a.version]
+        if scene: cmd+=['--scene',scene]
+        if a.heapdef: cmd+=['--heapdef',str(a.heapdef)]
+        run(cmd,tree,logs/f'ios-overlay-{name}.log',env)
     if canvas:   # the canvas and every scene size the pane offers above 1600x900 need their HeapDef overlay
-        for scene in [None,*dict.fromkeys(pane_scene_sizes(ios))]:
-            name=f'{canvas[0]}x{canvas[1]}'+(f'-scene-{scene}' if scene else '')
-            cmd=[sys.executable,tree/'scripts/make_output_res_overlay.py',f'{canvas[0]}x{canvas[1]}','--version',a.version]
-            if scene: cmd+=['--scene',scene]
-            run(cmd,tree,logs/f'ios-overlay-{name}.log',env)
+        for scene in [None,*scenes]: overlay(canvas[0],canvas[1],scene)
+    # The non-native modes start on a 1920x1080 canvas. build_app pre-generates these overlays; a direct build_ipa on
+    # a tree that lacks them would otherwise let the pane's 1920x1080 scene fall back to 1600x900 at runtime.
+    if canvas!=(1920,1080):
+        for scene in scenes:
+            if not (tree/f'extracted/{a.version}/romfs-patches-out/1920x1080-scene-{scene}').is_dir():
+                overlay(1920,1080,scene)
     version_dir=tree/'build'/({'v0':'','v112':'v112','v121':'v121','v143':'v143'}[a.version])
     if a.version=='v0': version_dir=tree/'build'
     for name in ('runtime_tables.h','romfs_config.h'):
@@ -90,8 +109,14 @@ def main():
     e['TOTK_OUTPUT_RES']=f'{canvas[0]}x{canvas[1]}' if canvas else '0'
     # The device build verifies these embedded veneers unconditionally. A developer shell that exports with them off
     # (the repo's own test scripts do) would produce an IPA that refuses to start; the export always emits them.
-    for key in ('TOTK_REALTIME','TOTK_CLOTH_REALTIME','TOTK_HIGHFPS_FIX'): e[key]='1'
+    for key in ('TOTK_REALTIME','TOTK_CLOTH_REALTIME','TOTK_HIGHFPS_FIX','TOTK_FPS60'): e[key]='1'
+    # Export-only switches that must not leak from a developer shell into the shipped code.
+    for key in ('TOTK_FIXED_RES','TOTK_ASPECT_VERT'): e[key]='0'
     run([host,rewritten,'export-ios'],tree,logs/'export-ios.log',e)
+    if canvas:
+        baked=f'{canvas[0]}x{canvas[1]} swapchain'
+        if baked not in (logs/'export-ios.log').read_text(errors='replace'):
+            raise RuntimeError(f'export did not bake the {baked} canvas; see {logs/"export-ios.log"}')
     flags=subprocess.check_output([sys.executable,ios/'tools/gen_embed.py',rewritten,gen/'embed.S','--text-dir',modules,'main','subsdk0','sdk'],text=True,env=env).strip()
     # The app's sources use version-specific patch and generated runtime tables.
     project=(ios/'project.yml').read_text()

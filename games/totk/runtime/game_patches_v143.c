@@ -575,6 +575,9 @@ int runtime_output_res_toggle(void){
 #endif
 }
 int runtime_output_mode_cycle(void){
+#if TARGET_OS_IPHONE
+    return 0;   /* iOS chooses the picture mode in Settings; this would flip MetalFX flags without its canvas */
+#else
     if(!output_page)return 0;
     extern int mfxup_output_enabled(void);extern void dm_gfx_set_flag(const char *,int);
     int full=atomic_load((_Atomic uint64_t *)(void *)(output_page+32))==pack_size(output_canvas_w,output_canvas_h);
@@ -585,4 +588,5 @@ int runtime_output_mode_cycle(void){
     if(full!=native)runtime_output_res_toggle();
     dm_gfx_set_flag("mfx_output",mfx);dm_gfx_set_flag("mfx_upscale",mfx);
     fprintf(stderr,"[totk] key 3: %s\n",name);return 1;
+#endif
 }

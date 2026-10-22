@@ -137,11 +137,10 @@ static BOOL native_canvas_supported(void) {
 #endif
 }
 
-/* The Settings app pane is the single source of defaults: register its DefaultValue entries so the game sees the
-   same defaults before the player changes anything, then hand every key to the runtime as an environment variable.
-   The pane can be edited freely; a new TOTK_* row with a DefaultValue needs no other key list here. Plain defaults are
-   exported with overwrite=0, so devicectl --environment-variables still works; the picture and frame modes then
-   overwrite the keys they own, because one mode must own the whole pipeline. */
+/* The Settings app pane is the single source of defaults: every TOTK_* row with a DefaultValue is registered, so the
+   game sees the same defaults before the player changes anything, then handed to the runtime as an environment
+   variable. Plain keys use overwrite=0, so devicectl can still supply them; the picture and frame modes then overwrite
+   the keys they own, because one mode must own the whole pipeline. */
 static void apply_settings(void) {
     NSBundle *settings = [NSBundle bundleWithPath:[NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"Settings.bundle"]];
     NSString *path = [settings pathForResource:@"Root" ofType:@"plist"];
@@ -151,19 +150,9 @@ static void apply_settings(void) {
         NSString *key = item[@"Key"]; id value = item[@"DefaultValue"];
         if (key.length && [key hasPrefix:@"TOTK_"] && value) defaults[key] = value;
     }
-    if (!defaults.count) {   /* packaging lost the pane: keep the display/controller defaults the pane would supply */
-        defaults[@"TOTK_IOS_PICTURE_MODE"] = [NSString stringWithUTF8String:totk_picture_mode_default()];
-        defaults[@"TOTK_RENDER_RES"] = @"1600x900";
-        defaults[@"TOTK_FPS_CAP"] = [NSString stringWithUTF8String:totk_frame_mode_default()];
-        defaults[@"TOTK_ASPECT"] = @"display";
-        defaults[@"TOTK_TAA"] = @NO;
-        defaults[@"TOTK_HUD_MODE"] = @"all";
-        defaults[@"TOTK_GYRO"] = @YES;
-        defaults[@"TOTK_RUMBLE"] = @YES;
-        defaults[@"TOTK_KEYBOARD"] = @"auto";
-        defaults[@"TOTK_TOUCH_WITH_KEYBOARD"] = @NO;
-        defaults[@"TOTK_BACKUP"] = @YES;
-    }
+    /* A package without the pane is broken; do not keep a second, hand-copied copy of the defaults here. Each
+       consumer falls back to its own documented default (backup stays on, the picture and frame maps have theirs). */
+    if (!defaults.count) fprintf(stderr, "[totk] settings: no Settings.bundle defaults; using the runtime defaults\n");
     fprintf(stderr, "[totk] settings: %lu defaults from %s\n", (unsigned long)defaults.count, path.UTF8String ?: "no Settings.bundle");
     NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
     [d registerDefaults:defaults];
@@ -174,7 +163,8 @@ static void apply_settings(void) {
         } else if ([value isKindOfClass:NSString.class] && [value length]) {
             if ([value length] < 64) setenv(key.UTF8String, [value UTF8String], 0);
         }
-        /* An empty value leaves the environment alone: an inherited devicectl value must still win. */
+        /* overwrite=0: a devicectl value for a plain key still wins. The picture and frame blocks below own their keys
+           and replace them. */
     }
     /* Before the pane existed, the drawable height was the only display choice. Adopt a stored choice once so an
        upgrade keeps the player's cooler or sharper setting instead of silently starting in the new default mode. */
@@ -229,18 +219,26 @@ static void apply_settings(void) {
     if (fenv.fps) setenv("DM_FPS", fenv.fps, 1); else unsetenv("DM_FPS");
     setenv("TOTK_MFX", fenv.interp, 1);
     /* A scene stored by the old free-form pane may not be one of the pane's values any more; adopt its default
-       instead of leaving a value the pane cannot represent. */
+       instead of leaving a value the pane cannot represent. A valid devicectl value still wins: the loop above left
+       the environment alone, so use the effective value and only overwrite an invalid one. */
     NSDictionary *scene_row = pref_row(root, @"TOTK_RENDER_RES");
     NSArray *scene_values = scene_row[@"Values"] ?: @[];
-    NSString *scene = [d stringForKey:@"TOTK_RENDER_RES"];
-    if (scene_values.count && ![scene_values containsObject:scene]) {
-        NSString *fallback = scene_row[@"DefaultValue"] ?: @"1600x900";
-        fprintf(stderr, "[totk] settings: scene \"%s\" is not a pane value; using %s\n", scene.UTF8String ?: "", fallback.UTF8String);
+    NSString *fallback = scene_row[@"DefaultValue"] ?: @"1600x900";
+    NSString *storedScene = [d stringForKey:@"TOTK_RENDER_RES"];
+    if (!storedScene.length) storedScene = fallback;
+    const char *from_env = getenv("TOTK_RENDER_RES");
+    NSString *scene = from_env && *from_env ? @(from_env) : storedScene;
+    BOOL pane_values = scene_values.count > 0, env_valid = !pane_values || [scene_values containsObject:scene];
+    if (!env_valid) {
+        fprintf(stderr, "[totk] settings: scene \"%s\" is not a pane value; using %s\n", scene.UTF8String ?: "", storedScene.UTF8String);
+        scene = storedScene;
+    }
+    if (pane_values && ![scene_values containsObject:scene]) {
+        fprintf(stderr, "[totk] settings: stored scene \"%s\" is not a pane value; using %s\n", scene.UTF8String ?: "", fallback.UTF8String);
         scene = fallback;
         [d setObject:scene forKey:@"TOTK_RENDER_RES"];
     }
-    if (!scene.length) scene = @"1600x900";
-    setenv("TOTK_RENDER_RES", scene.UTF8String, 1);
+    setenv("TOTK_RENDER_RES", scene.UTF8String, env_valid ? 0 : 1);
     NSString *drawable = [NSString stringWithUTF8String:penv.drawable];
     /* getenv, not the stored switches: the picture mode may have overridden them. */
     fprintf(stderr, "[totk] settings: picture %s, display %s, scene %s, fps %s (hz %s, fps %s, mfx %s), aspect %s, hud %s, taa %d, mfx %s/%s, full %s, keyboard %s, touch-with-keyboard %d, backup %d\n",

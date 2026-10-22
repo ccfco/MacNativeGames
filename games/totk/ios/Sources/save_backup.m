@@ -1,7 +1,8 @@
 /* Keeps the game's save data in a folder the player picks in iCloud Drive (or anywhere in Files), so it outlives the
    app: deleting the app deletes Documents, not that folder. The folder is reached through a security-scoped bookmark
    stored in NSUserDefaults; a fresh install has no bookmark, so the app asks once (before the game thread starts, so a
-   restore cannot race the game's own save loading). Every copy is best-effort: a failure only logs, never blocks play. */
+   restore cannot race the game's own save loading). "Later" is remembered; the Settings pane has a switch to choose the
+   folder again. Every copy is best-effort: a failure only logs, never blocks play. */
 #import <UIKit/UIKit.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #include <stdio.h>
@@ -13,6 +14,8 @@
 #include "totk_ui_lang.h"
 
 static NSString *const kBookmark = @"TOTK_BACKUP_BOOKMARK";
+static NSString *const kDeclined = @"TOTK_BACKUP_DECLINED";   // "Later" was chosen: do not ask again on every launch
+static NSString *const kReconfigure = @"TOTK_BACKUP_RECONFIGURE";   // a Settings switch: forget the folder and ask again
 static NSString *const kFolderName = @"TOTK";
 static NSString *const kDirectories[] = {@"save", @"game-slot"};
 static const char *const kDirectoryEnvs[] = {"TOTK_PROFILE_DIR", "TOTK_GAME_SLOT_DIR"};   // main.m sets both
@@ -63,7 +66,20 @@ static const char *const kDirectoryEnvs[] = {"TOTK_PROFILE_DIR", "TOTK_GAME_SLOT
 }
 
 - (void)prepareFrom:(UIViewController *)host completion:(void (^)(void))ready {
-    if (!TOTKSaveBackup.enabled) { ready(); return; }
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    if (!TOTKSaveBackup.enabled) {
+        /* Turning backup off also forgets an earlier "Later", so turning it on again asks for a folder. */
+        [defaults removeObjectForKey:kDeclined];
+        [defaults setBool:NO forKey:kReconfigure];
+        ready();
+        return;
+    }
+    if ([defaults boolForKey:kReconfigure]) {
+        [defaults removeObjectForKey:kBookmark];
+        [defaults removeObjectForKey:kDeclined];
+        [defaults setBool:NO forKey:kReconfigure];
+        fprintf(stderr, "[totk-save] backup folder will be chosen again\n");
+    }
     __block BOOL started = NO;
     void (^done)(void) = ^{
         if (started) return;
@@ -76,21 +92,31 @@ static const char *const kDirectoryEnvs[] = {"TOTK_PROFILE_DIR", "TOTK_GAME_SLOT
             (void)timer; [self syncNow];
         }];
     };
-    NSData *bookmark = [NSUserDefaults.standardUserDefaults dataForKey:kBookmark];
+    NSData *bookmark = [defaults dataForKey:kBookmark];
     if (bookmark && [self adoptBookmark:bookmark]) {
+        [defaults removeObjectForKey:kDeclined];
         fprintf(stderr, "[totk-save] backup folder %s\n", root.path.UTF8String);
         [self restoreIfFreshWithCompletion:done];
         return;
     }
+    /* A bookmark that no longer resolves is a broken backup, not a player who said "later": ask again. */
+    if (bookmark) [defaults removeObjectForKey:kDeclined];
+    if ([defaults boolForKey:kDeclined]) {
+        fprintf(stderr, "[totk-save] backup folder not chosen earlier; starting without one (choose it again in Settings)\n");
+        done();
+        return;
+    }
     [self explain:host choose:^{
         [self chooseFrom:host completion:^(BOOL picked) {
+            if (picked) [defaults removeObjectForKey:kDeclined];
+            else [defaults setBool:YES forKey:kDeclined];
             if (picked) [self restoreIfFreshWithCompletion:done]; else done();
         }];
     } later:done];
 }
 
-/* One short explanation before the system folder picker; "later" still starts the game (a fresh install without a
-   bookmark asks again next launch). */
+/* One short explanation before the system folder picker; "Later" is remembered, so the next launch starts the game
+   without asking again. The Settings pane's "choose the backup folder again" switch clears that choice. */
 - (void)explain:(UIViewController *)host choose:(void (^)(void))choose later:(void (^)(void))later {
     if (!host) { later(); return; }
     __block BOOL answered = NO;
@@ -113,7 +139,11 @@ static const char *const kDirectoryEnvs[] = {"TOTK_PROFILE_DIR", "TOTK_GAME_SLOT
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), choose);
     }]];
     [alert addAction:[UIAlertAction actionWithTitle:@(TOTK_UI("以后再说", "Later")) style:UIAlertActionStyleCancel
-                                            handler:^(UIAlertAction *action) { (void)action; finish(NO); }]];
+                                            handler:^(UIAlertAction *action) {
+        (void)action;
+        [NSUserDefaults.standardUserDefaults setBool:YES forKey:kDeclined];
+        finish(NO);
+    }]];
     [host presentViewController:alert animated:YES completion:^{
         if (host.presentedViewController != alert) finish(NO);   // another presenter won: do not leave the game waiting
     }];
