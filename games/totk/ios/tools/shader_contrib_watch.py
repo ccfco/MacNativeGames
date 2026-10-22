@@ -9,7 +9,11 @@ signed in, the question offers "Submit automatically" instead of "Remind me next
 secret gist and an issue that links it), without the browser. `install` runs `check` every 10 minutes as a LaunchAgent
 (build_app.py --platform ios installs it); `uninstall` removes it.
 
-usage: shader_contrib_watch.py check | install | uninstall"""
+usage: shader_contrib_watch.py check | install [--bundle <the game's bundle id>] | uninstall
+
+A build signed with its own display name and bundle id (not "Tears of the Kingdom" / *.totk) is found with --bundle;
+the id is kept in ~/Library/Application Support/MacNativeGames/TOTK/ios-contribution-config.json for the agent."""
+import argparse
 import json
 import os
 import plistlib
@@ -26,14 +30,29 @@ CHECK_EVERY = 10 * 60          # the LaunchAgent's interval
 PULL_EVERY = 30 * 60           # one copy per device at most this often
 ISSUE_URL = 'https://github.com/ly05010419/MacNativeGames/issues/new?template=shader-list.yml'
 APP_NAME = 'Tears of the Kingdom'
+EXTRA_NAMES = {'王国之泪', 'The Legend of Zelda: Tears of the Kingdom', 'Zelda: Tears of the Kingdom'}
 LABEL = 'org.macnativegames.totk.ios-shader-contrib'
 DATA = Path.home() / 'Library/Application Support/MacNativeGames/TOTK'
 STORE = DATA / 'ios-contributions'
+CONFIG = DATA / 'ios-contribution-config.json'
 AGENT = Path.home() / f'Library/LaunchAgents/{LABEL}.plist'
 LOG = Path.home() / 'Library/Logs/MacNativeGames/ios-shader-contrib.log'
 REPO = 'ly05010419/MacNativeGames'
 UPLOAD_NAME = 'shader-list-contribution.txt'   # the copy here is named after the device id, which is not sent
 GH_CANDIDATES = ('/opt/homebrew/bin/gh', '/usr/local/bin/gh')   # the LaunchAgent's PATH has no Homebrew
+
+
+def configured_bundle():
+    """A bundle the player named (install --bundle ...), for builds whose display name is their own."""
+    try:
+        return json.loads(CONFIG.read_text()).get('bundle') or None
+    except (OSError, ValueError):
+        return None
+
+
+def save_config(bundle):
+    DATA.mkdir(parents=True, exist_ok=True)
+    CONFIG.write_text(json.dumps({'bundle': bundle}, indent=2) + '\n')
 
 
 def reachable_devices(listing):
@@ -47,11 +66,16 @@ def reachable_devices(listing):
     return out
 
 
-def game_bundle(apps):
-    """The game's bundle identifier on a device, from `device info apps --json-output`, or None."""
-    for app in apps.get('result', {}).get('apps', []):
-        if app.get('name') == APP_NAME or app.get('bundleIdentifier', '').endswith('.totk'):
-            return app['bundleIdentifier']
+def game_bundle(apps, wanted=None):
+    """The game's bundle identifier on a device, from `device info apps --json-output`, or None.
+    wanted (a build's own bundle id) wins when it is installed; otherwise a known display name or .totk bundle is
+    the game, so one configured build does not hide the game on another device."""
+    installed = {a.get('bundleIdentifier'): a.get('name', '') for a in apps.get('result', {}).get('apps', [])}
+    if wanted and wanted in installed:
+        return wanted
+    for bundle, name in installed.items():
+        if name == APP_NAME or name in EXTRA_NAMES or (bundle or '').endswith('.totk'):
+            return bundle
     return None
 
 
@@ -191,12 +215,22 @@ def check():
         if stamp.exists() and time.time() - stamp.stat().st_mtime < PULL_EVERY:
             continue
         stamp.touch()
-        bundle = game_bundle(devicectl('device', 'info', 'apps', '--device', ident) or {})
+        wanted = configured_bundle()
+        def pull(bundle):
+            return devicectl('device', 'copy', 'from', '--device', ident, '--domain-type', 'appDataContainer',
+                             '--domain-identifier', bundle, '--source', 'Documents/shader-list-contribution.txt',
+                             '--destination', str(path))
+        bundle = wanted or game_bundle(devicectl('device', 'info', 'apps', '--device', ident) or {})
         if not bundle:
+            print(f'{time.strftime("%Y-%m-%d %H:%M:%S")} {name}: game app not found '
+                  f'(set it with: shader_contrib_watch.py install --bundle <bundle id>)', flush=True)
             continue
         path = STORE / f'{udid}.txt'
-        if devicectl('device', 'copy', 'from', '--device', ident, '--domain-type', 'appDataContainer', '--domain-identifier',
-                     bundle, '--source', 'Documents/shader-list-contribution.txt', '--destination', str(path)) is None:
+        pulled = pull(bundle)
+        if pulled is None and wanted:   # the configured build was removed: find whatever game the device has
+            bundle = game_bundle(devicectl('device', 'info', 'apps', '--device', ident) or {})
+            pulled = pull(bundle) if bundle else None
+        if pulled is None:
             continue
         rows = contribution_rows(path.read_text(errors='replace'))
         reminded = reminded_at(state.read_text() if state.exists() else '')
@@ -231,11 +265,18 @@ def uninstall():
     subprocess.run(['launchctl', 'bootout', f'gui/{os.getuid()}/{LABEL}'], capture_output=True)
     AGENT.unlink(missing_ok=True)
     (DATA / 'tools' / Path(__file__).name).unlink(missing_ok=True)
+    CONFIG.unlink(missing_ok=True)
     print(f'removed {AGENT}')
 
 
 if __name__ == '__main__':
-    command = sys.argv[1] if len(sys.argv) == 2 else ''
-    if command not in ('check', 'install', 'uninstall'):
-        sys.exit(__doc__)
-    {'check': check, 'install': install, 'uninstall': uninstall}[command]()
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(dest='command', required=True)
+    sub.add_parser('check')
+    sub.add_parser('install').add_argument(
+        '--bundle', help='the installed game\'s bundle id, for a build with its own display name (kept for the agent)')
+    sub.add_parser('uninstall')
+    a = parser.parse_args()
+    if getattr(a, 'bundle', None):
+        save_config(a.bundle)
+    {'check': check, 'install': install, 'uninstall': uninstall}[a.command]()

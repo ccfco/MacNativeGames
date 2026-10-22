@@ -342,12 +342,26 @@ int runtime_output_res(unsigned *w,unsigned *h){
  * margin: measured 2026-10-19, a 3440x1440 canvas with a 2580x1080 scene crashed in the allocator (main+0x1c2d20) at
  * +258 MiB and loaded at +400 MiB. That was before render_res_publish divided out the game's own canvas scaling (the
  * scene was then about 4620x1935), so for the scene asked for the heaps are now larger than needed: safe, not tight.
- * The HeapDef overlay (scripts/make_output_res_overlay.py --scene) uses the same formula. Mac only: iOS keeps the
- * game's own heaps. */
+ * The HeapDef overlay (scripts/make_output_res_overlay.py --scene) uses the same formula. */
 static int render_res(unsigned *w,unsigned *h);
+#if TARGET_OS_IPHONE
+/* The phone ships HeapDef overlays for the scene sizes the Settings pane lists; an overlay the bundle lacks would stop
+   the game at overlay_init, so an unknown size falls back to the shipped 1600x900 instead of failing to start. */
+static int ios_scene_overlay(unsigned w,unsigned h){
+    if((double)w*h<=1600.0*900.0)return 1;
+    if(runtime_scene_overlay_available(w,h))return 1;
+    fprintf(stderr,"[totk] scene %ux%u: no HeapDef overlay in the bundle; using 1600x900\n",w,h);
+    return 0;
+}
+static int render_res_ios(unsigned *w,unsigned *h){
+    if(!render_res(w,h))return 0;
+    if(ios_scene_overlay(*w,*h))return 1;
+    *w=1600;*h=900;return 1;
+}
+#endif
 int runtime_render_res(unsigned *w,unsigned *h){
 #if TARGET_OS_IPHONE
-    (void)w;(void)h;return 0;
+    return render_res_ios(w,h);
 #else
     return !getenv("TOTK_EXPORT_IOS")&&render_res(w,h);
 #endif
@@ -437,8 +451,11 @@ static int render_res(unsigned *w,unsigned *h){
     return 1;
 }
 static void patch_render_res(Module *m){
-    unsigned w=1280,h=720;int set=render_res(&w,&h);
-#if !TARGET_OS_IPHONE
+    unsigned w=1280,h=720;
+#if TARGET_OS_IPHONE
+    int set=render_res_ios(&w,&h);
+#else
+    int set=render_res(&w,&h);
     if(!set)return;   /* Mac (and the iOS export): the game's own size unless asked */
 #endif
     uint64_t data=(m->file_size+0x3fff)&~0x3fffULL;

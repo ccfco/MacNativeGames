@@ -45,6 +45,8 @@ targets:
         GCSupportsControllerUserInteraction: true
         GCSupportedGameControllers:
           - ProfileName: ExtendedGamepad
+        LSSupportsGameMode: true   # iPadOS 18.6+: Game Mode scheduling and controller latency (GCSupportsGameMode is gone)
+        LSApplicationCategoryType: public.app-category.games
         CADisableMinimumFrameDurationOnPhone: true
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false

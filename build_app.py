@@ -863,6 +863,8 @@ def step_update_data(tree, game, update, keys, logs, *, version='v112', mod=None
     if version == 'v143':   # a TOTK_RENDER_RES scene above 1600x900 grows the same heaps (runtime/game_patches_v143.c)
         steps += [('make_output_res_overlay.py', [canvas, '--scene', scene])
                   for canvas in ('1920x1080', '2560x1440') for scene in ('1920x1080', '2560x1440')]
+        # The iPad's panel is 2420x1668: the iOS Settings pane offers that scene size, on the 1920x1080 canvas it uses.
+        steps.append(('make_output_res_overlay.py', ['1920x1080', '--scene', '2420x1668']))
     for i, (script, arguments) in enumerate(steps):
         if heapdef and script == 'make_output_res_overlay.py':   # every variant of the file keeps the mod's heap sizes
             arguments = [*arguments, '--heapdef', heapdef]
@@ -1695,7 +1697,8 @@ def main(argv):
             # The iOS app never asks during play; while the device is connected, this Mac asks to send the shaders the
             # shared list lacks (ios/tools/shader_contrib_watch.py). Not essential: a failure only says so.
             try:
-                run([py, 'ios/tools/shader_contrib_watch.py', 'install'], logs/'shader-contrib-watch.log', cwd=tree, env=env)
+                run([py, 'ios/tools/shader_contrib_watch.py', 'install', '--bundle', BUNDLE_ID],
+                    logs/'shader-contrib-watch.log', cwd=tree, env=env)
                 say('   installed the Mac reminder for iPhone / iPad shader contributions (remove: python3 '
                     'games/totk/ios/tools/shader_contrib_watch.py uninstall)')
             except BuildError as e:

@@ -12,55 +12,67 @@
 			<key>Title</key>
 			<string>画面 · Display</string>
 			<key>FooterText</key>
-			<string>重新启动游戏后生效 · takes effect after relaunching the game</string>
+			<string>下面的值可以自由填写；重新启动游戏后生效 · type any supported value; takes effect after relaunching the game</string>
 		</dict>
 		<dict>
 			<key>Type</key>
-			<string>PSRadioGroupSpecifier</string>
+			<string>PSTextFieldSpecifier</string>
 			<key>Key</key>
 			<string>TOTK_IOS_DRAWABLE_H</string>
 			<key>Title</key>
-			<string>显示分辨率 · Display resolution</string>
+			<string>显示缓冲高度 · Display buffer height</string>
 			<key>DefaultValue</key>
 			<string>1080</string>
-			<key>Values</key>
-			<array>
-				<string>720</string>
-				<string>1080</string>
-				<string>0</string>
-			</array>
-			<key>Titles</key>
-			<array>
-				<string>省电 · 720p</string>
-				<string>均衡 · 1080p</string>
-				<string>原生 · Native</string>
-			</array>
+			<key>KeyboardType</key>
+			<string>NumberPad</string>
+			<key>AutoCapitalizationType</key>
+			<string>None</string>
+			<key>AutoCorrectionType</key>
+			<string>None</string>
 			<key>FooterText</key>
-			<string>合成器绘制尺寸；场景清晰度由下一项决定 · the compositor drawable; scene sharpness is the next setting</string>
+			<string>16:9 画面的行数：720 / 1080 / 0 = 原生；也可填任意高度。合成器把这张缓冲放大到 iPad 面板 · rows for the 16:9 picture: 720 / 1080 / 0 = native; any height; the compositor scales it to the iPad panel</string>
 		</dict>
 		<dict>
 			<key>Type</key>
-			<string>PSRadioGroupSpecifier</string>
+			<string>PSTextFieldSpecifier</string>
 			<key>Key</key>
 			<string>TOTK_RENDER_RES</string>
 			<key>Title</key>
 			<string>场景渲染分辨率 · Scene render resolution</string>
 			<key>DefaultValue</key>
 			<string>1600x900</string>
+			<key>KeyboardType</key>
+			<string>Alphabet</string>
+			<key>AutoCapitalizationType</key>
+			<string>None</string>
+			<key>AutoCorrectionType</key>
+			<string>None</string>
+			<key>FooterText</key>
+			<string>WxH：960x540 / 1280x720 / 1600x900 / 1920x1080 / 2560x1440 / 2420x1668；更高需要包内 HeapDef overlay。越高越清晰，也越耗电、发热 · WxH; higher is sharper and hotter</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSRadioGroupSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_FPS_CAP</string>
+			<key>Title</key>
+			<string>帧率上限 · Frame rate cap</string>
+			<key>DefaultValue</key>
+			<string>60</string>
 			<key>Values</key>
 			<array>
-				<string>960x540</string>
-				<string>1280x720</string>
-				<string>1600x900</string>
+				<string>120</string>
+				<string>60</string>
+				<string>30</string>
 			</array>
 			<key>Titles</key>
 			<array>
-				<string>省电 · 540p</string>
-				<string>均衡 · 720p</string>
-				<string>清晰 · 900p</string>
+				<string>120 帧（最热）</string>
+				<string>60 帧（推荐）</string>
+				<string>30 帧（省电）</string>
 			</array>
 			<key>FooterText</key>
-			<string>越高越清晰，也越耗电、发热；M5 建议 900p · higher is sharper and hotter; 900p is recommended on M5</string>
+			<string>60 使用真正的 60 Hz 显示节拍，ProMotion 也会降到 60，比 120 Hz 隔帧省电；30 走省电路径。重启游戏后生效 · 60 uses a real 60 Hz display link; 30 is the power-saving path; takes effect after relaunching</string>
 		</dict>
 		<dict>
 			<key>Type</key>
@@ -86,6 +98,12 @@
 		</dict>
 		<dict>
 			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+			<key>Title</key>
+			<string>手柄与键盘 · Controller and keyboard</string>
+		</dict>
+		<dict>
+			<key>Type</key>
 			<string>PSToggleSwitchSpecifier</string>
 			<key>Key</key>
 			<string>TOTK_GYRO</string>
@@ -107,6 +125,58 @@
 			<true/>
 			<key>FooterText</key>
 			<string>需要支持 HD 震动的手柄 · needs a controller with haptics</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSRadioGroupSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_KEYBOARD</string>
+			<key>Title</key>
+			<string>妙控键盘 · Magic Keyboard</string>
+			<key>DefaultValue</key>
+			<string>auto</string>
+			<key>Values</key>
+			<array>
+				<string>auto</string>
+				<string>off</string>
+			</array>
+			<key>Titles</key>
+			<array>
+				<string>自动（连接时启用）</string>
+				<string>关闭</string>
+			</array>
+			<key>FooterText</key>
+			<string>自动检测硬件键盘；关闭后只用触屏和手柄，防止键盘异常时无法操作 · detects a hardware keyboard; off keeps touch and controllers only</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSToggleSwitchSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_TOUCH_WITH_KEYBOARD</string>
+			<key>Title</key>
+			<string>连接键盘时保留触屏 · Keep touch with a keyboard</string>
+			<key>DefaultValue</key>
+			<false/>
+			<key>FooterText</key>
+			<string>默认像手柄一样收起触控层；打开后键盘和触屏同时可用 · the touch layer hides for a keyboard by default; on keeps both</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+			<key>Title</key>
+			<string>存档 · Save</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSToggleSwitchSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_BACKUP</string>
+			<key>Title</key>
+			<string>iCloud Drive 自动备份 · iCloud Drive backup</string>
+			<key>DefaultValue</key>
+			<true/>
+			<key>FooterText</key>
+			<string>首次启用时 App 会让你选择一个 iCloud Drive 文件夹；save 和 game-slot 会自动镜像过去，删 App 也不会丢 · the app asks for an iCloud Drive folder once; save and game-slot are mirrored there and survive deleting the app</string>
 		</dict>
 		<dict>
 			<key>Type</key>

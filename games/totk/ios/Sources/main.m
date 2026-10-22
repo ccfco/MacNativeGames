@@ -10,6 +10,7 @@
 #include "runtime.h"
 #include "dmsh_chain.h"
 #import "touch_pad.h"
+#import "save_backup.h"
 
 int totk_host_main(int argc, char **argv);
 void runtime_ios_attach_layer(CAMetalLayer *layer, UIView *host);
@@ -47,9 +48,13 @@ void runtime_shortcut_help_toggle(void) {}
     fprintf(stderr, "[totk-audio] audio session category=%s active=%d route=%s err=%s%s\n",
             audio.category.UTF8String ?: "?", (int)activated, audio.currentRoute.outputs.firstObject.portType.UTF8String ?: "?",
             catErr ? catErr.localizedDescription.UTF8String : "none", actErr ? actErr.localizedDescription.UTF8String : "");
-    pthread_attr_t attr; pthread_attr_init(&attr); pthread_attr_setstacksize(&attr, 64u << 20);
-    pthread_t thread; pthread_create(&thread, &attr, run_host, NULL);
-    pthread_detach(thread); pthread_attr_destroy(&attr);
+    /* The backup folder (and a fresh install's restore) is settled before the game thread starts: the game opens its
+       save as it boots, and restoring under it would race that. Without a bookmark the player picks the folder now. */
+    [TOTKSaveBackup prepareFrom:self completion:^{
+        pthread_attr_t attr; pthread_attr_init(&attr); pthread_attr_setstacksize(&attr, 64u << 20);
+        pthread_t thread; pthread_create(&thread, &attr, run_host, NULL);
+        pthread_detach(thread); pthread_attr_destroy(&attr);
+    }];
 }
 - (BOOL)prefersHomeIndicatorAutoHidden { return YES; }
 - (BOOL)prefersStatusBarHidden { return YES; }
@@ -96,8 +101,9 @@ static void audio_observe(void) {
 }
 
 /* The Settings app pane is the single source of defaults: register its DefaultValue entries so the game sees the
-   same defaults before the player changes anything, then hand its switches to the runtime as environment variables.
-   overwrite=0 keeps devicectl --environment-variables winning when testing from the Mac. */
+   same defaults before the player changes anything, then hand every key to the runtime as an environment variable.
+   The pane can be edited freely; new TOTK_* rows work without another key list here. overwrite=0 keeps
+   devicectl --environment-variables winning when testing from the Mac. */
 static void apply_settings(void) {
     NSBundle *settings = [NSBundle bundleWithPath:[NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"Settings.bundle"]];
     NSString *path = [settings pathForResource:@"Root" ofType:@"plist"];
@@ -105,26 +111,59 @@ static void apply_settings(void) {
     NSMutableDictionary *defaults = [NSMutableDictionary dictionary];
     for (NSDictionary *item in root[@"PreferenceSpecifiers"] ?: @[]) {
         NSString *key = item[@"Key"]; id value = item[@"DefaultValue"];
-        if (key.length && value) defaults[key] = value;
+        if (key.length && [key hasPrefix:@"TOTK_"] && value) defaults[key] = value;
     }
-    if (!defaults.count) {   /* packaging lost the pane: keep the display defaults the pane would have supplied */
+    if (!defaults.count) {   /* packaging lost the pane: keep the display/controller defaults the pane would supply */
         defaults[@"TOTK_IOS_DRAWABLE_H"] = @"1080";
         defaults[@"TOTK_RENDER_RES"] = @"1600x900";
         defaults[@"TOTK_ASPECT"] = @"display";
+        defaults[@"TOTK_FPS_CAP"] = @"60";
         defaults[@"TOTK_GYRO"] = @YES;
         defaults[@"TOTK_RUMBLE"] = @YES;
+        defaults[@"TOTK_KEYBOARD"] = @"auto";
+        defaults[@"TOTK_TOUCH_WITH_KEYBOARD"] = @NO;
+        defaults[@"TOTK_BACKUP"] = @YES;
     }
     fprintf(stderr, "[totk] settings: %lu defaults from %s\n", (unsigned long)defaults.count, path.UTF8String ?: "no Settings.bundle");
     NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
     [d registerDefaults:defaults];
-    for (NSString *key in @[@"TOTK_LANG", @"TOTK_IOS_DRAWABLE_H", @"TOTK_RENDER_RES", @"TOTK_ASPECT"]) {
-        NSString *value = [d stringForKey:key];
-        if (value.length && value.length < 32) setenv(key.UTF8String, value.UTF8String, 0);
-    }
-    for (NSString *key in @[@"TOTK_GYRO", @"TOTK_RUMBLE"]) {
+    for (NSString *key in defaults) {
         id value = [d objectForKey:key];
-        if (value) setenv(key.UTF8String, [value boolValue] ? "1" : "0", 0);
+        if ([value isKindOfClass:NSNumber.class]) {
+            setenv(key.UTF8String, [value boolValue] ? "1" : "0", 0);
+        } else if ([value isKindOfClass:NSString.class] && [value length]) {
+            if ([value length] < 64) setenv(key.UTF8String, [value UTF8String], 0);
+        }
+        /* An empty value leaves the environment alone: an inherited devicectl value must still win. */
     }
+    NSString *fps = [d stringForKey:@"TOTK_FPS_CAP"];
+    if ([fps isEqualToString:@"60"]) setenv("DM_PRESENT_HZ", "60", 0);
+    else if ([fps isEqualToString:@"30"]) setenv("DM_FPS", "30", 0);
+    else setenv("DM_PRESENT_HZ", "120", 0);
+    /* Free-form text fields can be mistyped; a value the runtime rejects would stop the boot, so fall back instead. */
+    NSString *scene = [d stringForKey:@"TOTK_RENDER_RES"];
+    unsigned sw = 0, sh = 0; char tail = 0;
+    if (!scene.length || sscanf(scene.UTF8String, "%ux%u%c", &sw, &sh, &tail) != 2 || sw < 64 || sw > 4096 || sh < 64 || sh > 4096) {
+        fprintf(stderr, "[totk] settings: scene \"%s\" is not widthxheight (64..4096); using 1600x900\n", scene.UTF8String ?: "");
+        setenv("TOTK_RENDER_RES", "1600x900", 1);
+        scene = @"1600x900";
+    }
+    NSString *drawable = [d stringForKey:@"TOTK_IOS_DRAWABLE_H"];
+    char *end = NULL; long rows = drawable.length ? strtol(drawable.UTF8String, &end, 10) : -1;
+    BOOL numeric = drawable.length && end != drawable.UTF8String && end && *end == 0;
+    if (!numeric || (rows != 0 && (rows < 240 || rows > 4320))) {
+        fprintf(stderr, "[totk] settings: drawable \"%s\" is not 0 or 240..4320; using 1080\n", drawable.UTF8String ?: "");
+        setenv("TOTK_IOS_DRAWABLE_H", "1080", 1);
+        drawable = @"1080";
+    }
+    fprintf(stderr, "[totk] settings: display %s, scene %s, fps %s, aspect %s, keyboard %s, touch-with-keyboard %d, backup %d\n",
+            drawable.UTF8String ?: "?",
+            scene.UTF8String ?: "?",
+            fps.UTF8String ?: "120",
+            [[d stringForKey:@"TOTK_ASPECT"] UTF8String] ?: "?",
+            [[d stringForKey:@"TOTK_KEYBOARD"] UTF8String] ?: "auto",
+            (int)[d boolForKey:@"TOTK_TOUCH_WITH_KEYBOARD"],
+            (int)[d boolForKey:@"TOTK_BACKUP"]);
 }
 
 @interface TOTKApp : UIResponder <UIApplicationDelegate> @end
