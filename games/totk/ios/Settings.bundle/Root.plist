@@ -12,7 +12,7 @@
 			<key>Title</key>
 			<string>画面 · Display</string>
 			<key>FooterText</key>
-			<string>下面的值可以自由填写；重新启动游戏后生效 · type any supported value; takes effect after relaunching the game</string>
+			<string>上面的值都可以自由填写；重启游戏后生效。推荐组合：场景 1600x900 + 缓冲 1080（均衡），或场景 1280x720 + 缓冲 720（最省电）· free-form values; takes effect after relaunching. Recommended: scene 1600x900 + buffer 1080 (balanced), or scene 1280x720 + buffer 720 (coolest)</string>
 		</dict>
 		<dict>
 			<key>Type</key>
@@ -20,7 +20,7 @@
 			<key>Key</key>
 			<string>TOTK_IOS_DRAWABLE_H</string>
 			<key>Title</key>
-			<string>显示缓冲高度 · Display buffer height</string>
+			<string>显示缓冲高度（推荐 1080）· Display buffer height</string>
 			<key>DefaultValue</key>
 			<string>1080</string>
 			<key>KeyboardType</key>
@@ -30,7 +30,7 @@
 			<key>AutoCorrectionType</key>
 			<string>None</string>
 			<key>FooterText</key>
-			<string>16:9 画面的行数：720 / 1080 / 0 = 原生；也可填任意高度。合成器把这张缓冲放大到 iPad 面板 · rows for the 16:9 picture: 720 / 1080 / 0 = native; any height; the compositor scales it to the iPad panel</string>
+			<string>这是最终画面的“行数”，不是屏幕像素：720 省电、画面略软；1080 推荐，文字清晰；0 = iPad 面板原生，最清晰也最热。在 2420x1668 的 iPad 上分别约 1281x883 / 1919x1323 / 2420x1668，也可填 240–4320 之间的任意值 · rows for the final picture, not screen pixels: 720 runs coolest and is softer; 1080 recommended; 0 = native panel, sharpest and hottest. On a 2420x1668 iPad these are about 1281x883 / 1919x1323 / 2420x1668; any height 240–4320 works</string>
 		</dict>
 		<dict>
 			<key>Type</key>
@@ -38,7 +38,7 @@
 			<key>Key</key>
 			<string>TOTK_RENDER_RES</string>
 			<key>Title</key>
-			<string>场景渲染分辨率 · Scene render resolution</string>
+			<string>场景渲染分辨率（推荐 1600x900）· Scene render resolution</string>
 			<key>DefaultValue</key>
 			<string>1600x900</string>
 			<key>KeyboardType</key>
@@ -48,7 +48,7 @@
 			<key>AutoCorrectionType</key>
 			<string>None</string>
 			<key>FooterText</key>
-			<string>WxH：960x540 / 1280x720 / 1600x900 / 1920x1080 / 2560x1440 / 2420x1668；更高需要包内 HeapDef overlay。越高越清晰，也越耗电、发热 · WxH; higher is sharper and hotter</string>
+			<string>WxH，只影响 3D 世界。推荐 1600x900（接近原作、60 帧稳定）。更省电：1280x720 / 960x540；更高画质：1920x1080（像素 +44%，更热）；2560x1440、2420x1668 需要包内 overlay，发热明显。没有对应 overlay 的尺寸会回退到 1600x900 · WxH, the 3D world only. 1600x900 recommended. Cooler: 1280x720 / 960x540. Sharper: 1920x1080 (+44% pixels, hotter); 2560x1440 and 2420x1668 need a bundled overlay and run hot. A size without its overlay falls back to 1600x900.</string>
 		</dict>
 		<dict>
 			<key>Type</key>

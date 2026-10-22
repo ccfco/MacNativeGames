@@ -1,7 +1,8 @@
 /* Other picture shapes on the Mac: key 4 cycles the game's 16:9 -> fitting the window / display (a 21:9 or 32:9 monitor, a
    MacBook's 16:10 in full screen below the notch) -> 21:9 -> 16:9. Fitting is skipped while the window is within 1% of
    16:9 or 21:9, where it would show the same. TOTK_ASPECT=32:9, 16:10, 3440x1440 or 2.39 takes the place of 21:9 and
-   starts on it; TOTK_ASPECT=display starts on fitting the window. Not on iPhone / iPad.
+   starts on it; TOTK_ASPECT=display starts on fitting the window. The key is Mac-only; iPhone / iPad choose the shape
+   in Settings and bind the same data page.
    The game keeps drawing into its 16:9 canvas, but with the camera's aspect ratio set to the other one, so the picture
    holds the other view squeezed into it; the present pass then stretches it over the window (nvn_mtl.m
    present_stretch asks runtime_aspect_now), which restores the proportions on a screen of that shape.
@@ -76,7 +77,7 @@ void runtime_aspect_view(double w, double h) {
     if (atomic_load(&g_aspect_step) == ASPECT_STEP_FIT) aspect_apply();
 }
 
-/* Key 4 (runtime/input.c). Returns 0 where it is not available (iPhone / iPad, other game versions). */
+/* Key 4 (runtime/input.c, Mac; iPhone / iPad have no key 4 and set the shape in Settings). */
 int runtime_aspect_toggle(void) {
     if (!g_aspect_slot) return 0;
     int step = aspect_next_step(atomic_load(&g_aspect_step), aspect_bits_float(atomic_load(&g_aspect_view)), g_aspect_wide);
