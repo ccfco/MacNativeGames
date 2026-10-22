@@ -88,7 +88,9 @@ void runtime_boot_status(const char *stage,const char *detail);
 void runtime_boot_count(const char *stage,uint64_t done,uint64_t total);   /* a boot step counted in items (shader import) */
 /* True 2K (runtime/game_patches.c, Mac): TOTK_OUTPUT_RES=<w>x<h> sets the game's own output size. runtime_output_res gives it
    (0 when unset); runtime_output_res_extra_bytes is what the HeapDef overlay (scripts/make_output_res_overlay.py, same formula)
-   adds to the texture heap and to Graphics, and so to the application pool (runtime/services.c). */
+   adds to the texture heap and to Graphics, and so to the application pool (runtime/services.c).
+   iOS bakes one canvas at export (TOTK_IOS_CANVAS_W/H); the Settings pane's native-2K mode starts in it
+   (TOTK_IOS_OUTPUT_FULL=1), and runtime_output_res stays 0 in every other mode so the 1080p heaps stay 1080p. */
 int runtime_output_res(unsigned *w,unsigned *h);
 uint64_t runtime_output_res_extra_bytes(void);
 int runtime_scene_overlay_available(unsigned sw, unsigned sh);   /* runtime/romfs.c: the HeapDef overlay for this scene size is in the bundle */

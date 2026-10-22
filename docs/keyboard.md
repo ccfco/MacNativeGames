@@ -49,4 +49,6 @@ The two clusters, by position:
 - A disconnect or sleep releases every key, so a held `W` or `Space` cannot keep the game walking.
 - The mapping is fixed and positional. The in-game controller layout (`controls.txt`, `TOTK_CONTROLS`) applies to
   physical controllers, not to these keys.
-- The Mac build's `1` / `2` / `3` / `4` / `5` shortcuts are not mapped on iPhone or iPad.
+- The Mac build's `1` / `2` / `3` / `4` / `5` shortcuts are not mapped on iPhone or iPad. Their functions live in the
+  Settings pane instead: on-screen status (1), frame rate and interpolation (2), picture mode (3), aspect ratio (4) and
+  edge smoothing (5).

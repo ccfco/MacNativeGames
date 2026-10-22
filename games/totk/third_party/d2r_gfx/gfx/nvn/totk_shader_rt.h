@@ -31,3 +31,5 @@ void totk_rt_set_ready_hook(void (*hook)(NSString *variant, int stage));
 void totk_rt_counts(uint64_t *fresh, int64_t *total, uint64_t *last_new_ns);
 uint64_t totk_rt_ready_gen(void);   // moves each time a background translation has been recorded
 int totk_rt_can_translate(void);   // 0 on iOS and with TOTK_SHADER_NO_TRANSLATE=1
+/* Variants recorded under shader-requests/ that no translation has replaced yet: the HUD's "缺 N" (0 when none). */
+int totk_shader_miss_count(void);

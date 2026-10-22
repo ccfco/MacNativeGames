@@ -9,6 +9,12 @@
 #include <math.h>
 #include "runtime.h"
 #include "dmsh_chain.h"
+#include "settings_map.h"
+#if __has_include("totk_ios_canvas.h")
+#include "totk_ios_canvas.h"   // written by ios/tools/build_ipa.py: the canvas baked into this build
+#else
+#define TOTK_IOS_CANVAS_BAKED 0
+#endif
 #import "touch_pad.h"
 #import "save_backup.h"
 
@@ -101,10 +107,41 @@ static void audio_observe(void) {
     }];
 }
 
+/* apply_settings runs before the window scene exists, so there is no scene screen to ask yet. */
+static CGSize panel_size(void) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    return UIScreen.mainScreen.nativeBounds.size;
+#pragma clang diagnostic pop
+}
+static NSInteger panel_max_hz(void) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    return UIScreen.mainScreen.maximumFramesPerSecond;
+#pragma clang diagnostic pop
+}
+static NSDictionary *pref_row(NSDictionary *root, NSString *key) {
+    for (NSDictionary *item in root[@"PreferenceSpecifiers"] ?: @[])
+        if ([item[@"Key"] isEqual:key]) return item;
+    return nil;
+}
+
+/* Native 2K is baked into the app's game code at export. Only the panel the build was baked for can show it; another
+   device falls back to MetalFX 2K instead of starting a canvas it cannot size. */
+static BOOL native_canvas_supported(void) {
+#if TOTK_IOS_CANVAS_BAKED
+    CGSize s = panel_size();
+    return (MAX(s.width, s.height) == TOTK_IOS_CANVAS_W && MIN(s.width, s.height) == TOTK_IOS_CANVAS_H);
+#else
+    return NO;
+#endif
+}
+
 /* The Settings app pane is the single source of defaults: register its DefaultValue entries so the game sees the
    same defaults before the player changes anything, then hand every key to the runtime as an environment variable.
-   The pane can be edited freely; a new TOTK_* row with a DefaultValue needs no other key list here. overwrite=0 keeps
-   devicectl --environment-variables winning when testing from the Mac. */
+   The pane can be edited freely; a new TOTK_* row with a DefaultValue needs no other key list here. Plain defaults are
+   exported with overwrite=0, so devicectl --environment-variables still works; the picture and frame modes then
+   overwrite the keys they own, because one mode must own the whole pipeline. */
 static void apply_settings(void) {
     NSBundle *settings = [NSBundle bundleWithPath:[NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"Settings.bundle"]];
     NSString *path = [settings pathForResource:@"Root" ofType:@"plist"];
@@ -115,10 +152,12 @@ static void apply_settings(void) {
         if (key.length && [key hasPrefix:@"TOTK_"] && value) defaults[key] = value;
     }
     if (!defaults.count) {   /* packaging lost the pane: keep the display/controller defaults the pane would supply */
-        defaults[@"TOTK_IOS_DRAWABLE_H"] = @"1080";
+        defaults[@"TOTK_IOS_PICTURE_MODE"] = [NSString stringWithUTF8String:totk_picture_mode_default()];
         defaults[@"TOTK_RENDER_RES"] = @"1600x900";
+        defaults[@"TOTK_FPS_CAP"] = [NSString stringWithUTF8String:totk_frame_mode_default()];
         defaults[@"TOTK_ASPECT"] = @"display";
-        defaults[@"TOTK_FPS_CAP"] = @"60";
+        defaults[@"TOTK_TAA"] = @NO;
+        defaults[@"TOTK_HUD_MODE"] = @"all";
         defaults[@"TOTK_GYRO"] = @YES;
         defaults[@"TOTK_RUMBLE"] = @YES;
         defaults[@"TOTK_KEYBOARD"] = @"auto";
@@ -137,31 +176,84 @@ static void apply_settings(void) {
         }
         /* An empty value leaves the environment alone: an inherited devicectl value must still win. */
     }
+    /* Before the pane existed, the drawable height was the only display choice. Adopt a stored choice once so an
+       upgrade keeps the player's cooler or sharper setting instead of silently starting in the new default mode. */
+    NSDictionary *stored = [d persistentDomainForName:NSBundle.mainBundle.bundleIdentifier] ?: @{};
+    if (!stored[@"TOTK_IOS_PICTURE_MODE"]) {
+        NSString *old = stored[@"TOTK_IOS_DRAWABLE_H"];
+        NSString *migrated = [old isEqualToString:@"720"] ? @"720" : [old isEqualToString:@"1080"] ? @"1080" : old ? @"mfx" : nil;
+        if (migrated) {
+            [d setObject:migrated forKey:@"TOTK_IOS_PICTURE_MODE"];
+            fprintf(stderr, "[totk] settings: old drawable %s -> picture mode %s\n", old.UTF8String, migrated.UTF8String);
+        }
+    }
+    /* One picture mode owns the canvas, the drawable and the two MetalFX stages. It overwrites those keys because a
+       mode must not be contradicted by a key it owns. */
+    NSString *picture = [d stringForKey:@"TOTK_IOS_PICTURE_MODE"];
+    totk_picture_env penv;
+    totk_picture_env_parse(totk_picture_mode_default(), &penv);   // a valid fallback if the stored value is stale
+    if (!totk_picture_env_parse(picture.UTF8String, &penv)) {
+        fprintf(stderr, "[totk] settings: picture mode \"%s\" is not a pane value; using %s\n",
+                picture.UTF8String ?: "", totk_picture_mode_default());
+        picture = [NSString stringWithUTF8String:totk_picture_mode_default()];
+    }
+    if (penv.native_canvas[0] == '1' && !native_canvas_supported()) {
+        CGSize s = panel_size();
+        fprintf(stderr, "[totk] settings: native 2K is baked for another panel (this one is %.0fx%.0f); using MetalFX 2K\n",
+                s.width, s.height);
+        picture = @"mfx";
+        totk_picture_env_parse(picture.UTF8String, &penv);
+    }
+    setenv("TOTK_IOS_DRAWABLE_H", penv.drawable, 1);
+    setenv("TOTK_MFX_UPSCALE", penv.scene_upscale, 1);
+    setenv("TOTK_MFX_OUTPUT", penv.output_upscale, 1);
+    setenv("TOTK_IOS_OUTPUT_FULL", penv.native_canvas, 1);
+    /* Frame rate is one mode too: a mode that does not use a knob must clear it. */
     NSString *fps = [d stringForKey:@"TOTK_FPS_CAP"];
-    if ([fps isEqualToString:@"60"]) setenv("DM_PRESENT_HZ", "60", 0);
-    else if ([fps isEqualToString:@"30"]) setenv("DM_FPS", "30", 0);
-    else setenv("DM_PRESENT_HZ", "120", 0);
-    /* Free-form text fields can be mistyped; a value the runtime rejects would stop the boot, so fall back instead. */
+    totk_frame_env fenv;
+    totk_frame_env_parse(totk_frame_mode_default(), &fenv);
+    if (!totk_frame_env_parse(fps.UTF8String, &fenv)) {
+        fprintf(stderr, "[totk] settings: frame mode \"%s\" is not a pane value; using %s\n",
+                fps.UTF8String ?: "", totk_frame_mode_default());
+        fps = [NSString stringWithUTF8String:totk_frame_mode_default()];
+    }
+    /* 120 and interpolation both assume a 120 Hz panel. On a 60 Hz iPhone or iPad the display link stays at 60, and
+       half-refresh interpolation would run the game at 30 — fall back to the 60 mode instead. */
+    if (fenv.present_hz && !strcmp(fenv.present_hz, "120") && panel_max_hz() < 120) {
+        fprintf(stderr, "[totk] settings: frame mode %s needs 120 Hz; this panel is %ld Hz, using %s\n",
+                fps.UTF8String, (long)panel_max_hz(), totk_frame_mode_default());
+        fps = [NSString stringWithUTF8String:totk_frame_mode_default()];
+        totk_frame_env_parse(fps.UTF8String, &fenv);
+    }
+    if (fenv.present_hz) setenv("DM_PRESENT_HZ", fenv.present_hz, 1); else unsetenv("DM_PRESENT_HZ");
+    if (fenv.fps) setenv("DM_FPS", fenv.fps, 1); else unsetenv("DM_FPS");
+    setenv("TOTK_MFX", fenv.interp, 1);
+    /* A scene stored by the old free-form pane may not be one of the pane's values any more; adopt its default
+       instead of leaving a value the pane cannot represent. */
+    NSDictionary *scene_row = pref_row(root, @"TOTK_RENDER_RES");
+    NSArray *scene_values = scene_row[@"Values"] ?: @[];
     NSString *scene = [d stringForKey:@"TOTK_RENDER_RES"];
-    unsigned sw = 0, sh = 0; char tail = 0;
-    if (!scene.length || sscanf(scene.UTF8String, "%ux%u%c", &sw, &sh, &tail) != 2 || sw < 64 || sw > 4096 || sh < 64 || sh > 4096) {
-        fprintf(stderr, "[totk] settings: scene \"%s\" is not widthxheight (64..4096); using 1600x900\n", scene.UTF8String ?: "");
-        setenv("TOTK_RENDER_RES", "1600x900", 1);
-        scene = @"1600x900";
+    if (scene_values.count && ![scene_values containsObject:scene]) {
+        NSString *fallback = scene_row[@"DefaultValue"] ?: @"1600x900";
+        fprintf(stderr, "[totk] settings: scene \"%s\" is not a pane value; using %s\n", scene.UTF8String ?: "", fallback.UTF8String);
+        scene = fallback;
+        [d setObject:scene forKey:@"TOTK_RENDER_RES"];
     }
-    NSString *drawable = [d stringForKey:@"TOTK_IOS_DRAWABLE_H"];
-    char *end = NULL; long rows = drawable.length ? strtol(drawable.UTF8String, &end, 10) : -1;
-    BOOL numeric = drawable.length && end != drawable.UTF8String && end && *end == 0;
-    if (!numeric || (rows != 0 && (rows < 240 || rows > 4320))) {
-        fprintf(stderr, "[totk] settings: drawable \"%s\" is not 0 or 240..4320; using 1080\n", drawable.UTF8String ?: "");
-        setenv("TOTK_IOS_DRAWABLE_H", "1080", 1);
-        drawable = @"1080";
-    }
-    fprintf(stderr, "[totk] settings: display %s, scene %s, fps %s, aspect %s, keyboard %s, touch-with-keyboard %d, backup %d\n",
+    if (!scene.length) scene = @"1600x900";
+    setenv("TOTK_RENDER_RES", scene.UTF8String, 1);
+    NSString *drawable = [NSString stringWithUTF8String:penv.drawable];
+    /* getenv, not the stored switches: the picture mode may have overridden them. */
+    fprintf(stderr, "[totk] settings: picture %s, display %s, scene %s, fps %s (hz %s, fps %s, mfx %s), aspect %s, hud %s, taa %d, mfx %s/%s, full %s, keyboard %s, touch-with-keyboard %d, backup %d\n",
+            picture.UTF8String ?: "mfx",
             drawable.UTF8String ?: "?",
             scene.UTF8String ?: "?",
-            fps.UTF8String ?: "120",
+            fps.UTF8String ?: "60",
+            getenv("DM_PRESENT_HZ") ?: "-", getenv("DM_FPS") ?: "-", getenv("TOTK_MFX") ?: "-",
             [[d stringForKey:@"TOTK_ASPECT"] UTF8String] ?: "?",
+            [[d stringForKey:@"TOTK_HUD_MODE"] UTF8String] ?: "all",
+            (int)[d boolForKey:@"TOTK_TAA"],
+            getenv("TOTK_MFX_UPSCALE") ?: "1", getenv("TOTK_MFX_OUTPUT") ?: "1",
+            getenv("TOTK_IOS_OUTPUT_FULL") ?: "0",
             [[d stringForKey:@"TOTK_KEYBOARD"] UTF8String] ?: "auto",
             (int)[d boolForKey:@"TOTK_TOUCH_WITH_KEYBOARD"],
             (int)[d boolForKey:@"TOTK_BACKUP"]);

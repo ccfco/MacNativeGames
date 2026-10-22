@@ -12,43 +12,59 @@
 			<key>Title</key>
 			<string>画面 · Display</string>
 			<key>FooterText</key>
-			<string>上面的值都可以自由填写；重启游戏后生效。推荐组合：场景 1600x900 + 缓冲 1080（均衡），或场景 1280x720 + 缓冲 720（最省电）· free-form values; takes effect after relaunching. Recommended: scene 1600x900 + buffer 1080 (balanced), or scene 1280x720 + buffer 720 (coolest)</string>
+			<string>先选画质模式，场景细节和帧率再按需调整。重启游戏后生效 · choose a picture mode first; scene detail and frame rate are separate. Takes effect after relaunching</string>
 		</dict>
 		<dict>
 			<key>Type</key>
-			<string>PSTextFieldSpecifier</string>
+			<string>PSRadioGroupSpecifier</string>
 			<key>Key</key>
-			<string>TOTK_IOS_DRAWABLE_H</string>
+			<string>TOTK_IOS_PICTURE_MODE</string>
 			<key>Title</key>
-			<string>显示缓冲高度（推荐 1080）· Display buffer height</string>
+			<string>画质模式 · Picture mode</string>
 			<key>DefaultValue</key>
-			<string>1080</string>
-			<key>KeyboardType</key>
-			<string>NumberPad</string>
-			<key>AutoCapitalizationType</key>
-			<string>None</string>
-			<key>AutoCorrectionType</key>
-			<string>None</string>
+			<string>mfx</string>
+			<key>Values</key>
+			<array>
+				<string>mfx</string>
+				<string>native</string>
+				<string>1080</string>
+				<string>720</string>
+			</array>
+			<key>Titles</key>
+			<array>
+				<string>MetalFX 2K（推荐）· MetalFX 2K</string>
+				<string>原生 2K（最清晰，最热）· Native 2K</string>
+				<string>1080p（更凉）· 1080p</string>
+				<string>720p（最省电）· 720p</string>
+			</array>
 			<key>FooterText</key>
-			<string>这是最终画面的“行数”，不是屏幕像素：720 省电、画面略软；1080 推荐，文字清晰；0 = iPad 面板原生，最清晰也最热。在 2420x1668 的 iPad 上分别约 1281x883 / 1919x1323 / 2420x1668，也可填 240–4320 之间的任意值 · rows for the final picture, not screen pixels: 720 runs coolest and is softer; 1080 recommended; 0 = native panel, sharpest and hottest. On a 2420x1668 iPad these are about 1281x883 / 1919x1323 / 2420x1668; any height 240–4320 works</string>
+			<string>MetalFX 2K：1080p 画布 + 输出放大到面板，文字比 1080p 清楚，60 帧稳定；原生 2K：2420x1668 画布，文字真正原生，3D 仍按场景细节渲染，发热更高。原生 2K 需要构建为这块面板烘焙画布（默认构建面向 11 英寸 M5 iPad）；其他面板自动回退到 MetalFX 2K；1080p / 720p 降低显示缓冲，更凉。 · MetalFX 2K: 1080p canvas upscaled to the panel; Native 2K: a 2420x1668 canvas for native text (3D stays at the scene size; hotter). Native 2K needs a build baked for this panel (the default targets the 11-inch M5 iPad); other panels fall back to MetalFX 2K; 1080p / 720p lower the drawable.</string>
 		</dict>
 		<dict>
 			<key>Type</key>
-			<string>PSTextFieldSpecifier</string>
+			<string>PSRadioGroupSpecifier</string>
 			<key>Key</key>
 			<string>TOTK_RENDER_RES</string>
 			<key>Title</key>
-			<string>场景渲染分辨率（推荐 1600x900）· Scene render resolution</string>
+			<string>场景细节 · Scene detail</string>
 			<key>DefaultValue</key>
 			<string>1600x900</string>
-			<key>KeyboardType</key>
-			<string>Alphabet</string>
-			<key>AutoCapitalizationType</key>
-			<string>None</string>
-			<key>AutoCorrectionType</key>
-			<string>None</string>
+			<key>Values</key>
+			<array>
+				<string>1600x900</string>
+				<string>1920x1080</string>
+				<string>1280x720</string>
+				<string>960x540</string>
+			</array>
+			<key>Titles</key>
+			<array>
+				<string>推荐 1600x900 · Recommended</string>
+				<string>清晰 1920x1080（更热）· Sharper</string>
+				<string>流畅 1280x720（更凉）· Cooler</string>
+				<string>最省电 960x540 · Coolest</string>
+			</array>
 			<key>FooterText</key>
-			<string>WxH，只影响 3D 世界。推荐 1600x900（接近原作、60 帧稳定）。更省电：1280x720 / 960x540；更高画质：1920x1080（像素 +44%，更热）；2560x1440、2420x1668 需要包内 overlay，发热明显。没有对应 overlay 的尺寸会回退到 1600x900 · WxH, the 3D world only. 1600x900 recommended. Cooler: 1280x720 / 960x540. Sharper: 1920x1080 (+44% pixels, hotter); 2560x1440 and 2420x1668 need a bundled overlay and run hot. A size without its overlay falls back to 1600x900.</string>
+			<string>只影响 3D 世界，和画质模式独立。1920x1080 比 1600x900 多 44% 像素，发热明显；1280x720 / 960x540 更省电。 · 3D world only, independent of the picture mode. 1920x1080 renders 44% more pixels and runs hotter; 1280x720 / 960x540 are cooler.</string>
 		</dict>
 		<dict>
 			<key>Type</key>
@@ -56,23 +72,25 @@
 			<key>Key</key>
 			<string>TOTK_FPS_CAP</string>
 			<key>Title</key>
-			<string>帧率上限 · Frame rate cap</string>
+			<string>帧率 · Frame rate</string>
 			<key>DefaultValue</key>
 			<string>60</string>
 			<key>Values</key>
 			<array>
-				<string>120</string>
 				<string>60</string>
+				<string>120</string>
 				<string>30</string>
+				<string>interp</string>
 			</array>
 			<key>Titles</key>
 			<array>
-				<string>120 帧（最热）</string>
-				<string>60 帧（推荐）</string>
-				<string>30 帧（省电）</string>
+				<string>60 帧（推荐）· 60 fps</string>
+				<string>120 帧（最热）· 120 fps</string>
+				<string>30 帧（省电）· 30 fps</string>
+				<string>60 + 补帧到 120（实验）· 60 interpolated to 120</string>
 			</array>
 			<key>FooterText</key>
-			<string>60 使用真正的 60 Hz 显示节拍，ProMotion 也会降到 60，比 120 Hz 隔帧省电；30 走省电路径。重启游戏后生效 · 60 uses a real 60 Hz display link; 30 is the power-saving path; takes effect after relaunching</string>
+			<string>60 使用真正的 60 Hz 显示节拍，比 120 省电；120 最顺滑也最热；补帧用 MetalFX 插帧到 120，画面更顺但多约一帧延迟，属于实验档。120 和补帧需要 120 Hz 面板，60 Hz 设备自动回退到 60 帧。重启游戏后生效 · 60 uses a real 60 Hz display link and saves power over 120; interpolation adds MetalFX frames up to 120 with about one frame of latency (experimental). 120 and interpolation need a 120 Hz panel; a 60 Hz device falls back to 60. Takes effect after relaunching</string>
 		</dict>
 		<dict>
 			<key>Type</key>
@@ -95,6 +113,48 @@
 			</array>
 			<key>FooterText</key>
 			<string>填满屏幕会把 16:9 画面延伸到 iPad 全屏，少数 UI 特效可能偏移（实验性）· fills the iPad screen; a few UI effects may sit off (experimental)</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSToggleSwitchSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_TAA</string>
+			<key>Title</key>
+			<string>边缘平滑（MetalFX 时间性）· Edge smoothing</string>
+			<key>DefaultValue</key>
+			<false/>
+			<key>FooterText</key>
+			<string>对 3D 画面做时间性抗锯齿，边缘更稳；可能有轻微拖影，默认关闭。重启游戏后生效 · temporal anti-aliasing of the 3D scene; slight ghosting is possible. Off by default; takes effect after relaunching</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+			<key>Title</key>
+			<string>界面 · Interface</string>
+			<key>FooterText</key>
+			<string>重启游戏后生效 · takes effect after relaunching</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSRadioGroupSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_HUD_MODE</string>
+			<key>Title</key>
+			<string>屏幕状态 · On-screen status</string>
+			<key>DefaultValue</key>
+			<string>all</string>
+			<key>Values</key>
+			<array>
+				<string>all</string>
+				<string>off</string>
+			</array>
+			<key>Titles</key>
+			<array>
+				<string>显示（FPS、MetalFX、分辨率）· Show</string>
+				<string>关闭（更沉浸）· Off</string>
+			</array>
+			<key>FooterText</key>
+			<string>开启时右上角显示帧率、MetalFX 状态和分辨率，行尾是待补译的着色器数量；关闭后整行隐藏 · shows FPS, MetalFX and resolution in the top-right, with the number of shaders waiting for translation; off hides the line</string>
 		</dict>
 		<dict>
 			<key>Type</key>

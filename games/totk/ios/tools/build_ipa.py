@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Build an unsigned, sideloadable iPhone/iPad IPA from a prepared TOTK work tree."""
-import argparse, json, os, shutil, subprocess, sys
+import argparse, json, os, plistlib, shutil, subprocess, sys
 from pathlib import Path
 from compile_seed import METAL_FLAGS
 from xcode_dir import developer_dir
@@ -27,12 +27,31 @@ def copy_tree(src,dst):
     for p in src.rglob('*'):
         if p.is_file(): clone(p,dst/p.relative_to(src))
 
+def pane_scene_sizes(ios):
+    """The Settings pane's scene sizes above 1600x900: each needs its own HeapDef overlay on a bigger canvas."""
+    spec=plistlib.loads((ios/'Settings.bundle/Root.plist').read_bytes())
+    for item in spec.get('PreferenceSpecifiers',[]):
+        if item.get('Key')!='TOTK_RENDER_RES': continue
+        for value in item.get('Values',[]):
+            try: w,h=(int(v) for v in value.lower().split('x'))
+            except ValueError: continue
+            if w*h>1600*900: yield f'{w}x{h}'
+
 def main():
     p=argparse.ArgumentParser()
     p.add_argument('--tree',type=Path,required=True);p.add_argument('--out',type=Path,required=True)
     p.add_argument('--version',choices=['v0','v112','v121','v143'],required=True);p.add_argument('--logs',type=Path,required=True)
     p.add_argument('--app-name',default='Tears of the Kingdom');p.add_argument('--bundle-id',default='org.macnativegames.totk')
+    # Native 2K on iPad: the game code is baked for this canvas at export and the Settings pane may start in it.
+    # 0 disables it; the pane's native option then falls back to MetalFX 2K at launch. Only 1.4.3 has the HeapDef patch.
+    p.add_argument('--canvas',default='2420x1668',help='native-2K canvas as <width>x<height>, or 0 (1.4.3 only)')
     a=p.parse_args(); tree=a.tree.resolve(); ios=tree/'ios';gen=ios/'Gen';logs=a.logs.resolve(); out=a.out.resolve()
+    canvas=None
+    if a.version=='v143' and a.canvas and a.canvas!='0':
+        try: cw,ch=(int(v) for v in a.canvas.lower().split('x'))
+        except ValueError: raise RuntimeError('--canvas must be <width>x<height> or 0')
+        if not (640<=cw<=7680 and 360<=ch<=4320): raise RuntimeError('--canvas size out of range')
+        canvas=(cw,ch)
     if out.suffix.lower()!='.ipa': raise RuntimeError('iOS output path must end in .ipa')
     # Required by the asset catalog below: fail before the export and shader seed, not after them.
     if not (tree/'build/AppIcon.icns').is_file(): raise RuntimeError(f'missing app icon: {tree/"build/AppIcon.icns"}; build_app.py extracts it from the control data')
@@ -41,6 +60,19 @@ def main():
     subprocess.run(['xcodebuild','-version'],env=env,check=True,stdout=subprocess.DEVNULL)
     if not shutil.which('xcodegen'): raise RuntimeError('install xcodegen: brew install xcodegen')
     gen.mkdir(parents=True,exist_ok=True)
+    # One generated header carries the baked canvas into both the Settings code and the runtime patch; a missing or
+    # stale header would make a mode the runtime cannot start, so there is no second macro injection point.
+    (gen/'totk_ios_canvas.h').write_text(
+        '#pragma once\n'
+        f'#define TOTK_IOS_CANVAS_BAKED {1 if canvas else 0}\n'
+        f'#define TOTK_IOS_CANVAS_W {canvas[0] if canvas else 0}\n'
+        f'#define TOTK_IOS_CANVAS_H {canvas[1] if canvas else 0}\n')
+    if canvas:   # the canvas and every scene size the pane offers above 1600x900 need their HeapDef overlay
+        for scene in [None,*dict.fromkeys(pane_scene_sizes(ios))]:
+            name=f'{canvas[0]}x{canvas[1]}'+(f'-scene-{scene}' if scene else '')
+            cmd=[sys.executable,tree/'scripts/make_output_res_overlay.py',f'{canvas[0]}x{canvas[1]}','--version',a.version]
+            if scene: cmd+=['--scene',scene]
+            run(cmd,tree,logs/f'ios-overlay-{name}.log',env)
     version_dir=tree/'build'/({'v0':'','v112':'v112','v121':'v121','v143':'v143'}[a.version])
     if a.version=='v0': version_dir=tree/'build'
     for name in ('runtime_tables.h','romfs_config.h'):
@@ -53,6 +85,9 @@ def main():
     # size at launch. The host only needs a valid size to install the patch, so force one: a caller's TOTK_RENDER_RES=0
     # would otherwise leave the Settings values with no patch to drive.
     e=dict(env,TOTK_EXPORT_IOS=str(modules)); e['TOTK_RENDER_RES']='1280x720'
+    # Always explicit: an inherited TOTK_OUTPUT_RES from a Mac 2K test shell must not bake a canvas this app has no
+    # header for (its veneer would then write the uninitialized data page).
+    e['TOTK_OUTPUT_RES']=f'{canvas[0]}x{canvas[1]}' if canvas else '0'
     # The device build verifies these embedded veneers unconditionally. A developer shell that exports with them off
     # (the repo's own test scripts do) would produce an IPA that refuses to start; the export always emits them.
     for key in ('TOTK_REALTIME','TOTK_CLOTH_REALTIME','TOTK_HIGHFPS_FIX'): e[key]='1'

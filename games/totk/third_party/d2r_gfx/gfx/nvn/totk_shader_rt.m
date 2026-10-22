@@ -50,6 +50,26 @@ static uint64_t g_translated;
    and the variants in the cache (counted once in the background, plus the new ones since). */
 static _Atomic uint64_t g_new_variants, g_new_variant_ns, g_new_at_count;
 static _Atomic int64_t g_cached_variants = -1;
+/* Variants waiting in shader-requests/ for a translation from the Mac (HUD "缺 N"). Counted once at boot: a request
+   whose Metal library is already in the cache or the bundled seed is filled, even before warm_filled moves it to done/;
+   record_miss increments the count for new requests. */
+static _Atomic int g_miss_pending;
+static void miss_pending_init(void) {   // at the end of totk_rt_dir's boot block
+    NSString *seed = g_seed_dir;
+    NSUInteger n = 0;
+    for (NSString *name in [NSFileManager.defaultManager contentsOfDirectoryAtPath:@"shader-requests" error:nil] ?: @[]) {
+        if (![name hasSuffix:@".json"]) continue;
+        NSString *variant = [name stringByDeletingPathExtension];
+        if ([NSFileManager.defaultManager fileExistsAtPath:[g_dir stringByAppendingFormat:@"/%@_b.metal", variant]]) continue;
+        if (seed && [NSFileManager.defaultManager fileExistsAtPath:[seed stringByAppendingFormat:@"/%@_b.metal", variant]]) continue;
+        n++;
+    }
+    atomic_store_explicit(&g_miss_pending, n > 999999 ? 999999 : (int)n, memory_order_relaxed);
+}
+int totk_shader_miss_count(void) {
+    int v = atomic_load_explicit(&g_miss_pending, memory_order_relaxed);
+    return v > 0 ? v : 0;
+}
 
 static NSString *root_dir(void) {   // native-port/ (the executable lives in native-port/build/)
     if (g_root) return g_root;
@@ -110,6 +130,7 @@ NSString *totk_rt_dir(void) {
             (unsigned long)[fill[@"packs"] unsignedIntegerValue], (unsigned long)[fill[@"imported_files"] unsignedIntegerValue]);
         for (NSString *why in fill[@"rejected"]) LOG("【红】[shader-fill] 丢弃不完整的着色器包 %s（请在 Mac 上重新运行 fill_shaders.py）", why.UTF8String);
 #endif
+        miss_pending_init();   // requests whose Metal library is already in the cache or seed are not waiting
     });
     return g_dir;
 }
@@ -314,7 +335,12 @@ static void record_miss(NSString *shader, NSDictionary *rq, NSDictionary *answer
     static NSMutableSet<NSString *> *missed; if (!missed) missed = [NSMutableSet set];
     if ([missed containsObject:variant]) return;
     [missed addObject:variant];
-    [[json_string(rq) dataUsingEncoding:NSUTF8StringEncoding] writeToFile:[NSString stringWithFormat:@"shader-requests/%@.json", variant] atomically:YES];
+    NSString *path = [NSString stringWithFormat:@"shader-requests/%@.json", variant];
+    BOOL existed = [NSFileManager.defaultManager fileExistsAtPath:path];
+    if (!existed) {   // an existing request is the same bytes for the same variant: do not rewrite it on every launch
+        [[json_string(rq) dataUsingEncoding:NSUTF8StringEncoding] writeToFile:path atomically:YES];
+        atomic_fetch_add_explicit(&g_miss_pending, 1, memory_order_relaxed);
+    }
     totk_contrib_add(shader, answers);   // not in the prepared seed, so not in the shared shader list yet
     LOG("[shader-miss] %s %s 不在手机的翻译缓存里：跳过用到它的绘制，请求已存 shader-requests/（第 %lu 个；在 Mac 上 ios/tools/fill_shaders.py 补上后下次启动预热）",
         [rq[@"stage"] UTF8String], variant.UTF8String, (unsigned long)missed.count);
