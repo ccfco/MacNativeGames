@@ -90,6 +90,18 @@ int runtime_aspect_toggle(void) {
     return 1;
 }
 
+/* Binds the data page and starts on the step TOTK_ASPECT asks for; the camera stubs read the slot. */
+static inline int aspect_bind(Module *m, double req, uint64_t data_off) {
+    g_aspect_slot = (_Atomic(uint32_t) *)(void *)(m->base + data_off + ASPECT_DATA_SLOT);
+    atomic_store(g_aspect_slot, 0);
+    g_aspect_named = req > 0;
+    g_aspect_wide = req > 0 ? (float)req : (float)ASPECT_WIDE;
+    int step = req > 0 ? ASPECT_STEP_WIDE : req == ASPECT_DISPLAY ? ASPECT_STEP_FIT : ASPECT_STEP_GAME;
+    atomic_store(&g_aspect_step, step);
+    aspect_apply();
+    return step;
+}
+
 /* sites: instructions that leave the ratio in an s register (fdiv s<d>, ... or ldr s<d>, [x<n>, #imm]), each with a
    plain stub from stub_off (ASPECT_STUB bytes per site). The first ncam are camera sites: when vert_off is not 0 and
    the inlined setFovy is there, their fovy load also gets a Vert+ stub (ASPECT_VSTUB bytes each, from vert_off). Both
@@ -98,7 +110,23 @@ int runtime_aspect_toggle(void) {
 static inline void aspect_install(Module *m, const char *version, const uint64_t *sites, unsigned nsite, unsigned ncam,
                                   uint64_t stub_off, uint64_t vert_off, uint64_t data_off) {
 #if TARGET_OS_IPHONE
-    (void)m; (void)version; (void)sites; (void)nsite; (void)ncam; (void)stub_off; (void)vert_off; (void)data_off;
+    /* The iOS export runs this function on a Mac host, so the camera branches and their stubs are already in the
+       embedded text. On the device only the data page is bound: the stubs read the ratio from it. */
+    (void)ncam; (void)vert_off;
+    double req = aspect_requested();
+    if (data_off + ASPECT_ATANF_SLOT + 8 > m->size) { fprintf(stderr, "[totk] aspect patch: no data page after main\n"); return; }
+    for (unsigned i = 0; i < nsite; i++) {
+        uint32_t got, want = aspect_b(sites[i], stub_off + ASPECT_STUB * i);
+        memcpy(&got, m->base + sites[i], 4);
+        if (!want || got != want) {
+            fprintf(stderr, "[totk] aspect patch: not embedded in this build; the picture keeps the game's 16:9\n");
+            return;
+        }
+    }
+    g_aspect_vert = NULL;
+    int step = aspect_bind(m, req, data_off);
+    fprintf(stderr, "[totk] %s aspect ratio: %s at start; the drawable's shape arrives with the view (%u site(s), stubs +%#llx)\n",
+            version, aspect_step_name(step), nsite, (unsigned long long)stub_off);
 #else
     double req = aspect_requested();
     /* TODO(Vert+): opt-in (TOTK_ASPECT_VERT=1) until these are fixed. Known issues:
@@ -150,15 +178,9 @@ static inline void aspect_install(Module *m, const char *version, const uint64_t
         uint64_t fa = (uint64_t)(uintptr_t)tanf_at, fb = (uint64_t)(uintptr_t)atanf_at;
         memcpy(m->base + data_off + ASPECT_TANF_SLOT, &fa, 8); memcpy(m->base + data_off + ASPECT_ATANF_SLOT, &fb, 8);
     }
-    g_aspect_slot = (_Atomic(uint32_t) *)(void *)(m->base + data_off + ASPECT_DATA_SLOT);
-    if (nvert) g_aspect_vert = (_Atomic(uint32_t) *)(void *)(m->base + data_off + ASPECT_VERT_SLOT);
-    atomic_store(g_aspect_slot, 0);
+    g_aspect_vert = nvert ? (_Atomic(uint32_t) *)(void *)(m->base + data_off + ASPECT_VERT_SLOT) : NULL;
     if (g_aspect_vert) atomic_store(g_aspect_vert, 0);
-    g_aspect_named = req > 0;
-    g_aspect_wide = req > 0 ? (float)req : (float)ASPECT_WIDE;
-    int step = req > 0 ? ASPECT_STEP_WIDE : req == ASPECT_DISPLAY ? ASPECT_STEP_FIT : ASPECT_STEP_GAME;
-    atomic_store(&g_aspect_step, step);
-    aspect_apply();
+    int step = aspect_bind(m, req, data_off);
     char wide[48]; if (g_aspect_named) snprintf(wide, sizeof wide, "%.4f (TOTK_ASPECT)", g_aspect_wide); else snprintf(wide, sizeof wide, "21:9");
     fprintf(stderr, "[totk] %s aspect ratio: key 4 cycles 16:9 / fit to the window / %s, starts at %s; %u site(s), %s, stubs +%#llx\n",
             version, wide, aspect_step_name(step), nsite,

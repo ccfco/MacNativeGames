@@ -10,9 +10,111 @@
 			<key>Type</key>
 			<string>PSGroupSpecifier</string>
 			<key>Title</key>
-			<string>遊戲語言 · Game language</string>
+			<string>画面 · Display</string>
 			<key>FooterText</key>
-			<string>重新啟動遊戲後生效 · takes effect after relaunching the game</string>
+			<string>重新启动游戏后生效 · takes effect after relaunching the game</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSRadioGroupSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_IOS_DRAWABLE_H</string>
+			<key>Title</key>
+			<string>显示分辨率 · Display resolution</string>
+			<key>DefaultValue</key>
+			<string>1080</string>
+			<key>Values</key>
+			<array>
+				<string>720</string>
+				<string>1080</string>
+				<string>0</string>
+			</array>
+			<key>Titles</key>
+			<array>
+				<string>省电 · 720p</string>
+				<string>均衡 · 1080p</string>
+				<string>原生 · Native</string>
+			</array>
+			<key>FooterText</key>
+			<string>合成器绘制尺寸；场景清晰度由下一项决定 · the compositor drawable; scene sharpness is the next setting</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSRadioGroupSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_RENDER_RES</string>
+			<key>Title</key>
+			<string>场景渲染分辨率 · Scene render resolution</string>
+			<key>DefaultValue</key>
+			<string>1600x900</string>
+			<key>Values</key>
+			<array>
+				<string>960x540</string>
+				<string>1280x720</string>
+				<string>1600x900</string>
+			</array>
+			<key>Titles</key>
+			<array>
+				<string>省电 · 540p</string>
+				<string>均衡 · 720p</string>
+				<string>清晰 · 900p</string>
+			</array>
+			<key>FooterText</key>
+			<string>越高越清晰，也越耗电、发热；M5 建议 900p · higher is sharper and hotter; 900p is recommended on M5</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSRadioGroupSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_ASPECT</string>
+			<key>Title</key>
+			<string>画面比例 · Aspect ratio</string>
+			<key>DefaultValue</key>
+			<string>display</string>
+			<key>Values</key>
+			<array>
+				<string>display</string>
+				<string>0</string>
+			</array>
+			<key>Titles</key>
+			<array>
+				<string>填满屏幕 · Fill the screen</string>
+				<string>16:9 · 黑边 · Letterbox</string>
+			</array>
+			<key>FooterText</key>
+			<string>填满屏幕会把 16:9 画面延伸到 iPad 全屏，少数 UI 特效可能偏移（实验性）· fills the iPad screen; a few UI effects may sit off (experimental)</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSToggleSwitchSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_GYRO</string>
+			<key>Title</key>
+			<string>手柄陀螺仪 · Controller gyroscope</string>
+			<key>DefaultValue</key>
+			<true/>
+			<key>FooterText</key>
+			<string>需要带陀螺仪的手柄（DualSense / DualShock / Switch Pro）· needs a controller with a gyroscope</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSToggleSwitchSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_RUMBLE</string>
+			<key>Title</key>
+			<string>手柄震动 · Controller rumble</string>
+			<key>DefaultValue</key>
+			<true/>
+			<key>FooterText</key>
+			<string>需要支持 HD 震动的手柄 · needs a controller with haptics</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+			<key>Title</key>
+			<string>游戏语言 · Game language</string>
+			<key>FooterText</key>
+			<string>重新启动游戏后生效 · takes effect after relaunching the game</string>
 		</dict>
 		<dict>
 			<key>Type</key>

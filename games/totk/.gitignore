@@ -20,6 +20,9 @@ tools/totk_xlate/bin/
 tests/reverb/bin/
 tests/reverb/obj/
 
+# The game's own icon, copied in by ios/tools/build_ipa.py from the build work tree (not redistributable).
+ios/Sources/Assets.xcassets/AppIcon.appiconset/AppIcon.png
+
 # Worktrees made by scripts/dev/new_worktree.sh link these to the main checkout; the patterns above with a
 # trailing slash match directories only, these also match the symlinks.
 /.venv

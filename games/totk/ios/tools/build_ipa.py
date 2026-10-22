@@ -47,7 +47,10 @@ def main():
     # Export the final code after all verified runtime patches have been applied, then embed it in executable segments.
     host=tree/('build/totk-native' if a.version=='v0' else f'build/totk-native-{a.version}')
     rewritten=tree/f'rewritten/{a.version}'; modules=gen/'modules';modules.mkdir(exist_ok=True)
-    e=dict(env,TOTK_EXPORT_IOS=str(modules))
+    # The iOS export writes code once: the render-resolution patch must be in that code for the Settings pane to choose a
+    # size at launch. The host only needs a valid size to install the patch, so force one: a caller's TOTK_RENDER_RES=0
+    # would otherwise leave the Settings values with no patch to drive.
+    e=dict(env,TOTK_EXPORT_IOS=str(modules)); e['TOTK_RENDER_RES']='1280x720'
     run([host,rewritten,'export-ios'],tree,logs/'export-ios.log',e)
     flags=subprocess.check_output([sys.executable,ios/'tools/gen_embed.py',rewritten,gen/'embed.S','--text-dir',modules,'main','subsdk0','sdk'],text=True,env=env).strip()
     # The app's sources use version-specific patch and generated runtime tables.
@@ -92,8 +95,13 @@ def main():
     (seed/'seed-manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
     # Generate the app project with resolved identity and the embedded-segment linker flags.
     env.update(TOTK_APP_NAME=a.app_name,TOTK_BUNDLE_ID=a.bundle_id)
+    # build_app.py extracts the game's own icon from its control data; asset catalogs take a 1024 px PNG.
+    icon_icns=tree/'build/AppIcon.icns'; icon_png=ios/'Sources/Assets.xcassets/AppIcon.appiconset/AppIcon.png'
+    if not icon_icns.is_file(): raise RuntimeError(f'missing app icon: {icon_icns}; build_app.py extracts it from the control data')
+    icon_png.parent.mkdir(parents=True,exist_ok=True)
+    run(['sips','-s','format','png','-z','1024','1024',icon_icns,'--out',icon_png],ios,logs/'app-icon.log',env)
     xcconfig=gen/'totk.xcconfig'
-    frameworks=' '.join('-framework '+x for x in ['UIKit','Metal','MetalFX','Foundation','QuartzCore','ImageIO','CoreGraphics','CoreText','UniformTypeIdentifiers','CoreFoundation','AudioToolbox','GameController','AVFAudio','Security'])
+    frameworks=' '.join('-framework '+x for x in ['UIKit','Metal','MetalFX','Foundation','QuartzCore','ImageIO','CoreGraphics','CoreText','UniformTypeIdentifiers','CoreFoundation','AudioToolbox','GameController','CoreHaptics','AVFAudio','Security'])
     xcconfig.write_text(f'OTHER_LDFLAGS = $(inherited) {frameworks} Gen/deps/lib/libopus.a Gen/deps/lib/libvpx.a {flags}\n')
     run(['xcodegen','generate','--spec','project.generated.yml'],ios,logs/'xcodegen.log',env)
     derived=tree/'build/ios-derived';run(['xcodebuild','-project','TOTKIOS.xcodeproj','-scheme','TOTKIOS','-configuration','Release',

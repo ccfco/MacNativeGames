@@ -95,6 +95,38 @@ static void audio_observe(void) {
     }];
 }
 
+/* The Settings app pane is the single source of defaults: register its DefaultValue entries so the game sees the
+   same defaults before the player changes anything, then hand its switches to the runtime as environment variables.
+   overwrite=0 keeps devicectl --environment-variables winning when testing from the Mac. */
+static void apply_settings(void) {
+    NSBundle *settings = [NSBundle bundleWithPath:[NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"Settings.bundle"]];
+    NSString *path = [settings pathForResource:@"Root" ofType:@"plist"];
+    NSDictionary *root = path ? [NSDictionary dictionaryWithContentsOfFile:path] : nil;
+    NSMutableDictionary *defaults = [NSMutableDictionary dictionary];
+    for (NSDictionary *item in root[@"PreferenceSpecifiers"] ?: @[]) {
+        NSString *key = item[@"Key"]; id value = item[@"DefaultValue"];
+        if (key.length && value) defaults[key] = value;
+    }
+    if (!defaults.count) {   /* packaging lost the pane: keep the display defaults the pane would have supplied */
+        defaults[@"TOTK_IOS_DRAWABLE_H"] = @"1080";
+        defaults[@"TOTK_RENDER_RES"] = @"1600x900";
+        defaults[@"TOTK_ASPECT"] = @"display";
+        defaults[@"TOTK_GYRO"] = @YES;
+        defaults[@"TOTK_RUMBLE"] = @YES;
+    }
+    fprintf(stderr, "[totk] settings: %lu defaults from %s\n", (unsigned long)defaults.count, path.UTF8String ?: "no Settings.bundle");
+    NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+    [d registerDefaults:defaults];
+    for (NSString *key in @[@"TOTK_LANG", @"TOTK_IOS_DRAWABLE_H", @"TOTK_RENDER_RES", @"TOTK_ASPECT"]) {
+        NSString *value = [d stringForKey:key];
+        if (value.length && value.length < 32) setenv(key.UTF8String, value.UTF8String, 0);
+    }
+    for (NSString *key in @[@"TOTK_GYRO", @"TOTK_RUMBLE"]) {
+        id value = [d objectForKey:key];
+        if (value) setenv(key.UTF8String, [value boolValue] ? "1" : "0", 0);
+    }
+}
+
 @interface TOTKApp : UIResponder <UIApplicationDelegate> @end
 @implementation TOTKApp
 - (UISceneConfiguration *)application:(UIApplication *)application configurationForConnectingSceneSession:(UISceneSession *)session options:(UISceneConnectionOptions *)options {
@@ -116,13 +148,9 @@ static void audio_observe(void) {
     for (NSString *name in @[@"save", @"temp", @"shader-cache", @"game-slot"]) [fm createDirectoryAtPath:[docs stringByAppendingPathComponent:name] withIntermediateDirectories:YES attributes:nil error:nil];
     NSString *log = [docs stringByAppendingPathComponent:@"log.txt"];
     if (freopen(log.fileSystemRepresentation,"w",stderr)) setvbuf(stderr,NULL,_IOLBF,0);
+    apply_settings();
     setenv("TOTK_ROMFS",[res stringByAppendingPathComponent:@"romfs"].fileSystemRepresentation,1);
     setenv("TOTK_OPERATION_MODE","handheld",1);
-    // Game language: the Settings app (Settings.bundle › TOTK_LANG) stores the choice in our defaults; empty means the
-    // system language, which is what the runtime already follows. iOS 27 does not honour Info.plist LSEnvironment, so
-    // the value must be applied here. overwrite=0 keeps devicectl --environment-variables winning when testing from the Mac.
-    NSString *lang = [NSUserDefaults.standardUserDefaults stringForKey:@"TOTK_LANG"];
-    if (lang.length>0&&lang.length<8) setenv("TOTK_LANG",lang.UTF8String,0);
     setenv("TOTK_ROMFS_PATCHES",[res stringByAppendingPathComponent:@"romfs-patches"].fileSystemRepresentation,1);
     setenv("TOTK_ROMFS_PATCHES_OUT",[res stringByAppendingPathComponent:@"romfs-patches-out"].fileSystemRepresentation,1);
     setenv("TOTK_SHARED_FONTS",[res stringByAppendingPathComponent:@"shared-fonts"].fileSystemRepresentation,1);

@@ -1,5 +1,6 @@
-/* The Mac controller's haptics and motion sensors for the game's HD rumble and six-axis sensor (runtime/hid_feedback.c),
-   2026-10-17. On by default (TOTK_RUMBLE=0 / TOTK_GYRO=0 turn them off), and only on macOS (iOS: stubs, never on).
+/* The controller's haptics and motion sensors for the game's HD rumble and six-axis sensor (runtime/hid_feedback.c),
+   2026-10-17. On by default (TOTK_RUMBLE=0 / TOTK_GYRO=0 turn them off), on macOS and iOS. The raw HID fallback for a
+   controller whose GameController motion stays all zeros needs IOKit, so it is macOS only.
    Rumble: each of the game's two vibration devices (left, right) is a Core Haptics engine on that handle of the
    controller (GCHapticsLocalityLeftHandle / RightHandle; a DualSense has both) playing a long continuous event. The
    game's value (two bands, each an amplitude 0..1 at a frequency) sets the event's intensity (TOTK_RUMBLE_GAIN, default 1,
@@ -20,12 +21,6 @@
 #include <string.h>
 #include "runtime.h"
 
-#if !TARGET_OS_OSX
-void runtime_feedback_attach(GCController *c) { (void)c; }
-void runtime_feedback_detach(GCController *c) { (void)c; }
-void runtime_feedback_quiet(void) {}
-void runtime_rumble_set(unsigned side, float al, float fl, float ah, float fh) { (void)side; (void)al; (void)fl; (void)ah; (void)fh; }
-#else
 #import <CoreHaptics/CoreHaptics.h>
 
 /* ---- rumble ----
@@ -185,7 +180,7 @@ static void motion_sample(GCMotion *m) {   /* the controller's handler queue */
     runtime_motion_feed(acc, gyro, runtime_now_ns());
 }
 
-/* ---- motion straight from a Switch Pro Controller's HID reports (2026-10-19) ----
+/* ---- motion straight from a Switch Pro Controller's HID reports (2026-10-19; macOS only) ----
    An 8BitDo controller in Switch mode (057e:2009 "Pro Controller" over Bluetooth) gets a GCMotion with hasRotationRate,
    and GameController delivers its samples (33 a second) -- but every one is exactly zero, moved or not, while the same
    controller's raw 0x30 reports carry live six-axis data (gyro up to 550 deg/s, about 1 G at rest) and its SPI factory
@@ -195,7 +190,9 @@ static void motion_sample(GCMotion *m) {   /* the controller's handler queue */
    left, z out of the face, acceleration as the push against gravity (lying face up z = +1 G). Scales from the SPI
    calibration (the user calibration at 0x8026 when it has its 0xB2A1 magic, else the factory one at 0x6020), as SDL:
    G = raw * 4 / (sensitivity - origin), deg/s = (raw - origin) * 936 / (sensitivity - origin); until it arrives the
-   sensor's nominal ranges, 8 G and 2000 deg/s over 32768. */
+   sensor's nominal ranges, 8 G and 2000 deg/s over 32768. Apple's GameController API is the only HID access on iOS, so
+   there a controller with all-zero motion has no gyro. */
+#if TARGET_OS_OSX
 #import <IOKit/hid/IOHIDManager.h>
 static IOHIDManagerRef hidManager;   /* main queue */
 static IOHIDDeviceRef hidDevice;     /* main queue */
@@ -278,6 +275,13 @@ static void hid_motion_stop(void) {   /* main queue */
     CFRelease(hidDevice); hidDevice = NULL;
     CFRelease(hidManager); hidManager = NULL;
 }
+#else
+static void hid_motion_start(void) {
+    static int logged;
+    if (!logged) { logged = 1; fprintf(stderr, "[gyro] GameController reports no motion for this controller; the raw HID fallback is macOS only\n"); }
+}
+static void hid_motion_stop(void) {}
+#endif
 
 /* ---- controllers ---- */
 void runtime_feedback_attach(GCController *c) {   /* main queue */
@@ -313,4 +317,3 @@ void runtime_feedback_detach(GCController *c) {   /* main queue */
         c.motion.valueChangedHandler = nil; hid_motion_stop(); motionPad = nil; runtime_motion_live(0);
     }
 }
-#endif

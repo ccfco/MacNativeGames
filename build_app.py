@@ -1543,6 +1543,8 @@ def parse_args(argv):
                          'the build leaves the folder alone and prints the two commands that fill it by hand')
     ap.add_argument('--shader-cache', type=Path, help=argparse.SUPPRESS)   # removed: the seed comes from the game data and the shared list
     ap.add_argument('--no-shader-reminder', action='store_true', help='iOS: do not install the Mac agent that asks, while an iPhone / iPad with the game is connected, to send the shaders the shared list lacks')
+    ap.add_argument('--app-name', default=APP_NAME, help=f'iOS: the name on the home screen (default: {APP_NAME})')
+    ap.add_argument('--bundle-id', default=BUNDLE_ID, help=f'iOS: the app bundle ID; must match the signing profile (default: {BUNDLE_ID})')
     fonts = ap.add_mutually_exclusive_group()
     fonts.add_argument('--firmware', type=Path, help='unpacked firmware NCA directory providing the six expected shared fonts (needed for NSP unless --shared-fonts or valid cached fonts are available)')
     fonts.add_argument('--shared-fonts', type=Path, help='previously extracted shared-font directory containing the six verified .bfttf files')
@@ -1550,7 +1552,9 @@ def parse_args(argv):
 
 
 def main(argv):
+    global APP_NAME, BUNDLE_ID
     args = parse_args(argv)
+    APP_NAME, BUNDLE_ID = args.app_name, args.bundle_id
     game, keys = args.game.expanduser().resolve(), args.keys.expanduser().resolve()
     if not game.is_file():
         raise BuildError(f'no such file: {game}')
