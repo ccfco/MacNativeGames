@@ -32,7 +32,14 @@ step "2/4 检查 iPad"
 if ! xcrun devicectl list devices 2>/dev/null | awk -v id="$DEVICE" '$0 ~ id && $0 !~ /unavailable/ { found = 1 } END { exit !found }'; then
     fail "iPad 未连接或不可用：$DEVICE"
 fi
-if ! xcrun devicectl device info apps --device "$DEVICE" 2>/dev/null | grep -q "$BUNDLE"; then
+APPS=""
+for attempt in 1 2 3; do
+    if APPS="$(xcrun devicectl device info apps --device "$DEVICE" 2>&1)"; then break; fi
+    [ "$attempt" -eq 3 ] && fail "无法读取 iPad 的 App 列表；请解锁 iPad、保持连接后重试"
+    sleep 1
+done
+[ -n "$APPS" ] || fail "iPad 返回了空的 App 列表；请解锁 iPad 后重试"
+if ! printf '%s\n' "$APPS" | grep -q "$BUNDLE"; then
     fail "iPad 上没有安装 $BUNDLE"
 fi
 printf '  设备在线，App 已安装\n  如果接下来的读取失败，请解锁 iPad 后重试\n'
