@@ -34,6 +34,8 @@ def main():
     p.add_argument('--app-name',default='Tears of the Kingdom');p.add_argument('--bundle-id',default='org.macnativegames.totk')
     a=p.parse_args(); tree=a.tree.resolve(); ios=tree/'ios';gen=ios/'Gen';logs=a.logs.resolve(); out=a.out.resolve()
     if out.suffix.lower()!='.ipa': raise RuntimeError('iOS output path must end in .ipa')
+    # Required by the asset catalog below: fail before the export and shader seed, not after them.
+    if not (tree/'build/AppIcon.icns').is_file(): raise RuntimeError(f'missing app icon: {tree/"build/AppIcon.icns"}; build_app.py extracts it from the control data')
     env=dict(os.environ,DEVELOPER_DIR=developer_dir())
     sdk=subprocess.check_output(['xcrun','--sdk','iphoneos','--show-sdk-path'],env=env,text=True).strip()
     subprocess.run(['xcodebuild','-version'],env=env,check=True,stdout=subprocess.DEVNULL)
@@ -51,6 +53,9 @@ def main():
     # size at launch. The host only needs a valid size to install the patch, so force one: a caller's TOTK_RENDER_RES=0
     # would otherwise leave the Settings values with no patch to drive.
     e=dict(env,TOTK_EXPORT_IOS=str(modules)); e['TOTK_RENDER_RES']='1280x720'
+    # The device build verifies these embedded veneers unconditionally. A developer shell that exports with them off
+    # (the repo's own test scripts do) would produce an IPA that refuses to start; the export always emits them.
+    for key in ('TOTK_REALTIME','TOTK_CLOTH_REALTIME','TOTK_HIGHFPS_FIX'): e[key]='1'
     run([host,rewritten,'export-ios'],tree,logs/'export-ios.log',e)
     flags=subprocess.check_output([sys.executable,ios/'tools/gen_embed.py',rewritten,gen/'embed.S','--text-dir',modules,'main','subsdk0','sdk'],text=True,env=env).strip()
     # The app's sources use version-specific patch and generated runtime tables.
@@ -97,7 +102,6 @@ def main():
     env.update(TOTK_APP_NAME=a.app_name,TOTK_BUNDLE_ID=a.bundle_id)
     # build_app.py extracts the game's own icon from its control data; asset catalogs take a 1024 px PNG.
     icon_icns=tree/'build/AppIcon.icns'; icon_png=ios/'Sources/Assets.xcassets/AppIcon.appiconset/AppIcon.png'
-    if not icon_icns.is_file(): raise RuntimeError(f'missing app icon: {icon_icns}; build_app.py extracts it from the control data')
     icon_png.parent.mkdir(parents=True,exist_ok=True)
     run(['sips','-s','format','png','-z','1024','1024',icon_icns,'--out',icon_png],ios,logs/'app-icon.log',env)
     xcconfig=gen/'totk.xcconfig'

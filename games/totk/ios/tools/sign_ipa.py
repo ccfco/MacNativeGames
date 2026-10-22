@@ -72,7 +72,13 @@ def main():
     app_id = ent.get('application-identifier', '')
     if '.' not in app_id:
         sys.exit('the profile has no application-identifier')
-    team, wanted_bundle = app_id.split('.', 1)
+    wanted_bundle = app_id.split('.', 1)[1]
+    wildcard = wanted_bundle.endswith('*')
+    if not ent.get('com.apple.developer.kernel.increased-memory-limit'):
+        # build_ipa.py signs the executable ad hoc with this entitlement; --force replaces the signature's
+        # entitlements with the profile's. Without it the game's 3.2 GiB pool falls back to the iOS default limit.
+        print('warning: the profile does not carry com.apple.developer.kernel.increased-memory-limit; '
+              'the signed app will not get the increased memory limit', file=sys.stderr)
 
     work = Path(tempfile.mkdtemp(prefix='totk-sign-', dir=out.parent))
     try:
@@ -83,11 +89,13 @@ def main():
         app = apps[0]
         info = plistlib.loads((app / 'Info.plist').read_bytes())
         bundle = info.get('CFBundleIdentifier', '')
-        if bundle != wanted_bundle:
+        if wildcard:
+            if not bundle.startswith(wanted_bundle[:-1]):
+                sys.exit(f'bundle ID {bundle!r} does not match the profile {wanted_bundle!r}; build with --bundle-id '
+                         f'{wanted_bundle[:-1]}<something>')
+        elif bundle != wanted_bundle:
             sys.exit(f'bundle ID {bundle!r} does not match the profile {wanted_bundle!r}; build with --bundle-id '
                      f'{wanted_bundle} or make a profile for {bundle}')
-        if team and not app_id.startswith(team + '.'):
-            sys.exit(f'profile application-identifier {app_id!r} is malformed')
 
         shutil.copy2(a.profile, app / 'embedded.mobileprovision')
         ent_path = work / 'signing-entitlements.plist'

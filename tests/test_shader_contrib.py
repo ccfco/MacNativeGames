@@ -99,10 +99,10 @@ class MacReminderForDevicesTests(unittest.TestCase):
         self.assertIsNone(watch.game_bundle({'result': {'apps': [{'name': 'Other', 'bundleIdentifier': 'x.y'}]}}))
 
     def test_a_build_with_its_own_bundle_id(self):
-        apps = {'result': {'apps': [{'name': '王国之泪', 'bundleIdentifier': 'app.cassava1408.celery1836'}]}}
-        self.assertEqual(watch.game_bundle(apps, 'app.cassava1408.celery1836'), 'app.cassava1408.celery1836')
+        apps = {'result': {'apps': [{'name': 'Tears of the Kingdom', 'bundleIdentifier': 'org.example.totk-custom'}]}}
+        self.assertEqual(watch.game_bundle(apps, 'org.example.totk-custom'), 'org.example.totk-custom')
         # another device without that build still finds the game by its name
-        self.assertEqual(watch.game_bundle(apps, 'org.example.not-installed'), 'app.cassava1408.celery1836')
+        self.assertEqual(watch.game_bundle(apps, 'org.example.not-installed'), 'org.example.totk-custom')
         self.assertIsNone(watch.game_bundle({'result': {'apps': [{'name': 'Other', 'bundleIdentifier': 'x.y'}]}},
                                             'org.example.not-installed'))
         with tempfile.TemporaryDirectory() as tmp:
@@ -110,8 +110,8 @@ class MacReminderForDevicesTests(unittest.TestCase):
             watch.CONFIG = Path(tmp) / 'config.json'
             try:
                 self.assertIsNone(watch.configured_bundle())
-                watch.save_config('app.cassava1408.celery1836')
-                self.assertEqual(watch.configured_bundle(), 'app.cassava1408.celery1836')
+                watch.save_config('org.example.totk-custom')
+                self.assertEqual(watch.configured_bundle(), 'org.example.totk-custom')
             finally:
                 watch.CONFIG = old
 
