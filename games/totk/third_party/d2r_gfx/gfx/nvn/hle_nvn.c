@@ -2678,14 +2678,15 @@ static int g_hz = -1, g_display_mode;
    42-47 fps, also with a time-constraint declaration from the measured frame time; the cause is not known yet. */
 #define UNCAPPED_HZ 240           /* the highest TOTK_UNCAPPED_HZ takes */
 #define UNCAPPED_DEFAULT_HZ 120   /* the Mac's ceiling without TOTK_UNCAPPED_HZ */
-/* TOTK_UNCAPPED_HZ: the uncapped clock's ceiling, 30..240 (default 120 on the Mac), or "display" for the display's refresh
-   rate: the iPhone / iPad default (user 2026-10-17: at most 60 on the iPhone 14's 60 Hz screen, where frames above it are
-   never shown and only heat the phone). The game still does not wait for the display, so a scene slower than the ceiling
+/* TOTK_UNCAPPED_HZ: the uncapped clock's ceiling, 30..240 (default 120 on the Mac, 30 on the iPhone / iPad since 2026-10-23),
+   or "display" for the display's refresh rate (the iPhone default before: at most 60 on the iPhone 14's 60 Hz screen,
+   where frames above it are never shown and only heat the phone). The game still does not wait for the display, so a scene slower than the ceiling
    is not held to 60 / 30 steps. */
 static int uncapped_cap(int scr) {
     const char *e = getenv("TOTK_UNCAPPED_HZ");
 #if TARGET_OS_IPHONE
-    if (!e) e = "display";
+    if (!e) e = "30";   // user 2026-10-23: 30 on the phone (in the world it runs about 30 anyway, GPU ~22-26 ms; an even 30 instead of
+                        // 30-60 changes); TOTK_UNCAPPED_HZ=display for the screen's rate as before
 #endif
     int v = !e ? UNCAPPED_DEFAULT_HZ : !strcmp(e, "display") ? (scr > 0 ? scr : 60) : atoi(e);
     return v < 30 ? 30 : v > UNCAPPED_HZ ? UNCAPPED_HZ : v;

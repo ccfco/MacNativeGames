@@ -2336,10 +2336,15 @@ static int pkg_final_cache_on(void) {
     if (v < 0) { const char *e = getenv("TOTK_PKG_FINAL_CACHE"); v = !(e && !atoi(e)); atomic_store(&g_pkg_final_cache, v); }
     return v;
 }
-@interface NvPkg : NSObject { @public id<MTLTexture> tex; uint64_t stamp, seen, hash, owned_gen; int tracked, owned, hashed; reup_key key; uint64_t chash, csub, used; uintptr_t lo, hi; uint8_t *edge; uint32_t eh, et; int edge_want; } @end   // lo / hi (TOTK): the texture's memory (pkg_orphan_report)   // tracked (TOTK): result of the last nvn_dirty_tracked   // hash：DM_NVN_DIRTYCHECK 时上传内容的全量哈希 | hash: full hash of the uploaded content under DM_NVN_DIRTYCHECK
+@interface NvPkg : NSObject { @public id<MTLTexture> tex; uint64_t stamp, seen, hash, owned_gen; int tracked, owned, hashed, vol, lost; reup_key key; uint64_t chash, csub, used; uintptr_t lo, hi; uint8_t *edge; uint32_t eh, et; int edge_want; } @end   // lo / hi (TOTK): the texture's memory (pkg_orphan_report)   // tracked (TOTK): result of the last nvn_dirty_tracked   // hash：DM_NVN_DIRTYCHECK 时上传内容的全量哈希 | hash: full hash of the uploaded content under DM_NVN_DIRTYCHECK
 /* TOTK: a mirrored texture the GPU starts rendering into is told directly (g_smu held), so tex_mtl no longer asks the owned
    set again every time any other serial joins it (a locked lookup per CPU-pool texture per new render target). */
-static void pkg_owned_locked(uint64_t k) { id o = hm_get_id(&g_by_serial, &k); if ([o isKindOfClass:[NvPkg class]]) ((NvPkg *)o)->owned = 1; }
+static void pkg_owned_locked(uint64_t k) {
+    id o = hm_get_id(&g_by_serial, &k); if (![o isKindOfClass:[NvPkg class]]) return;
+    NvPkg *pk = (NvPkg *)o; pk->owned = 1;
+    // a purgeable copy (pkg_purge_idle) the GPU now renders into must keep its memory; tex_mtl uploads it again if the system took it
+    if (pk->vol && pk->tex) { pk->vol = 0; if ([pk->tex setPurgeableState:MTLPurgeableStateNonVolatile] == MTLPurgeableStateEmpty) pk->lost = 1; }
+}
 @implementation NvPkg
 - (void)dealloc {
     free(edge);   // TOTK (#90): the shared first / last page bytes (pkg_edge_snap)
@@ -3365,7 +3370,10 @@ static id<MTLTexture> reup_take(const reup_key *k) {
    game samples them with normalised coordinates, so a texture one level smaller is drawn from what was its level 1 (on
    the 720p handheld screen most of them are minified anyway). Texture-ID views shift their level range (tex_by_id);
    a copy the GPU starts rendering into is uploaded again at full size (tex_mtl). 2D / 2D-array / cube textures with
-   at least two levels and both sides >= TOTK_MIP_DROP_MIN (512). TOTK_MIP_DROP=0 off, =1 on (default on iOS only). */
+   at least two levels and both sides >= TOTK_MIP_DROP_MIN (512). Not lower: at 256 the grass disappeared and the ground
+   took wrong colours on an iPhone 14 (2026-10-23): data textures of that size (terrain material / grass maps) are read
+   by integer texel coordinates, which a copy one level smaller does not match. TOTK_MIP_DROP=0 off, =1 on (default on
+   iOS only). */
 static uint64_t g_mip_dropped;
 static unsigned mip_drop_of(const tex_t *t) {
     static int on = -1; static unsigned minside;
@@ -3560,6 +3568,7 @@ static int tex_mirrored(const tex_t *t) {
     return 1;
 }
 static int tex_check_once(void) { static int v = -1; if (v < 0) { const char *e = getenv("TOTK_TEX_CHECK_ONCE"); v = !(e && !strcmp(e, "0")); if (!v) MLOG("TOTK_TEX_CHECK_ONCE=0：CPU 池贴图每次取用都查是否被改写（旧行为）"); } return v; }
+static void pkg_unpurge(NvPkg *pk);
 static id<MTLTexture> tex_mtl(const tex_t *ct) {
     tex_t *t = (tex_t *)ct; BOTW_TEX_FOLLOW(t)
     if (!t || !t->serial) return nil;
@@ -3568,6 +3577,7 @@ static id<MTLTexture> tex_mtl(const tex_t *ct) {
     if (packaged) {
         __unsafe_unretained NvPkg *pk = have;
         if (pk) pk->used = g_sub_serial;
+        if (pk && (pk->vol || pk->lost)) pkg_unpurge(pk);   // TOTK (iPhone): a copy marked purgeable while idle (pkg_purge_idle)
         /* TOTK: rendered into by the GPU since the upload: the pool memory is stale, never re-upload. The set only grows, so
            the answer is kept in the NvPkg and asked again only after it gained members (a locked lookup on every use before). */
         int reduced = pk && pk->tex && (pk->tex.mipmapLevelCount < (t->d.levels ? t->d.levels : 1u) || (tc_pf(t->d.format) != MTLPixelFormatInvalid && pk->tex.pixelFormat == tc_pf(t->d.format)));   // TOTK: copy without its top level (mip_drop_of) or transcoded (tex_tc): not something the GPU can render into
@@ -4898,7 +4908,21 @@ static NSString *pso_user_path(void) {
     return [(profile && *profile ? @(profile) : @"user-data") stringByAppendingPathComponent:@"pso_user.tsv"];
 }
 static FILE *g_pso_user; static int g_pso_user_checked;
-static NSMutableSet<NSString *> *g_pso_user_seen;
+/* Lines already in the warm lists, as 64-bit hashes of the line (seen_key): the lines themselves were ~190,000 strings,
+   53 MB on the Mac (a render pipeline's key is 1,088 hex digits; the iPhone also carries the shared list's 12,000 in
+   pso_list.tsv, 2026-10-23). A collision only leaves one line unrecorded. */
+static NSNumber *seen_key(const char *line, size_t n) { return @(pkg_hash(line, n)); }
+static NSNumber *seen_key_str(NSString *line) { const char *u = line.UTF8String; return seen_key(u, strlen(u)); }
+static NSMutableSet<NSNumber *> *g_pso_user_seen;
+static NSMutableSet<NSNumber *> *g_pso_shipped_seen;   // !warm_shared(): the shared list's lines, recorded but not shown as new
+/* The shared list's pipelines (pso_list.tsv: every player's, 13,875 rows after #229-#272) are kept in memory only on the
+   Mac. On an iPhone / iPad they are compiled into the pipeline archive before the title and dropped (warm_start,
+   warm_fill_archive): kept, 6,813 render pipelines put an iPhone 14 in the world at 3.82-3.89 GB with p99 117-200 ms
+   (2026-10-23). One drawn comes from the archive. TOTK_WARM_SHARED=1 / 0 forces either. */
+static int warm_shared(void) {
+    static int v = -1; if (v < 0) { const char *e = getenv("TOTK_WARM_SHARED"); v = e && *e ? atoi(e) != 0 : !TARGET_OS_IPHONE; }
+    return v;
+}
 static FILE *pso_user_file(void) {
     if (g_pso_user_checked) return g_pso_user;
     g_pso_user_checked = 1;
@@ -4923,18 +4947,31 @@ static void pso_user_record(const char *fmt, ...) {
     char line[8192]; va_list ap; va_start(ap, fmt); vsnprintf(line, sizeof line, fmt, ap); va_end(ap);
     if (!g_pso_user_seen) {
         g_pso_user_seen = [NSMutableSet set];
-        NSString *seed = g_shmap_path ? [g_shmap_path.stringByDeletingLastPathComponent stringByAppendingPathComponent:@"pso_manifest.tsv"] : nil;
-        NSMutableArray<NSString *> *paths = [NSMutableArray array]; if (seed) [paths addObject:seed]; NSString *user = pso_user_path(); if (user) [paths addObject:user];
+        // the app's lists count as seen too: iOS carries the shared list's pipelines in pso_list.tsv (build_ipa.py), and
+        // one the warm-up had not reached yet was written again and shown as new (835 of an iPhone's first 1,795, 2026-10-22)
+        NSString *dir = g_shmap_path.stringByDeletingLastPathComponent;
+        NSMutableArray<NSString *> *paths = [NSMutableArray array];
+        // without warm_shared() the shared list is not kept warm, so one of its pipelines drawn here is written to
+        // pso_user.tsv like any other and kept warm from the next start
+        for (NSString *name in warm_shared() ? @[@"pso_manifest.tsv", @"pso_list.tsv"] : @[@"pso_manifest.tsv"]) if (dir) [paths addObject:[dir stringByAppendingPathComponent:name]];
+        if (!warm_shared() && dir) @autoreleasepool {   // drawn here, one is new to this device's list but not to the game (the box's count)
+            g_pso_shipped_seen = [NSMutableSet set];
+            NSString *txt = [NSString stringWithContentsOfFile:[dir stringByAppendingPathComponent:@"pso_list.tsv"] encoding:NSUTF8StringEncoding error:nil];
+            for (NSString *old in [txt componentsSeparatedByString:@"\n"]) if (old.length && ![old hasPrefix:@"#"]) [g_pso_shipped_seen addObject:seen_key_str(old)];
+        }
+        NSString *user = pso_user_path(); if (user) [paths addObject:user];
         [paths addObject:pso_shared_path()];
-        for (NSString *path in paths) { NSString *txt = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil];
-            for (NSString *old in [txt componentsSeparatedByString:@"\n"]) if (old.length && ![old hasPrefix:@"#"]) [g_pso_user_seen addObject:old]; }
+        for (NSString *path in paths) @autoreleasepool { NSString *txt = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil];
+            for (NSString *old in [txt componentsSeparatedByString:@"\n"]) if (old.length && ![old hasPrefix:@"#"]) [g_pso_user_seen addObject:seen_key_str(old)]; }
     }
-    size_t ll = strlen(line); NSString *s = [[NSString alloc] initWithBytes:line length:ll && line[ll - 1] == '\n' ? ll - 1 : ll encoding:NSUTF8StringEncoding];   // 与清单文件按行（不含换行）比 | Compared with the manifest file line by line (without the newline)
-    if (!s || [g_pso_user_seen containsObject:s]) return;
-    [g_pso_user_seen addObject:s];
+    size_t ll = strlen(line);
+    NSNumber *k = seen_key(line, ll && line[ll - 1] == '\n' ? ll - 1 : ll);   // 与清单文件按行（不含换行）比 | Compared with the manifest file line by line (without the newline)
+    if ([g_pso_user_seen containsObject:k]) return;
+    [g_pso_user_seen addObject:k];
     if (f) { fputs(line, f); fflush(f); }
     if (g_pso_shared) { fputs(line, g_pso_shared); fflush(g_pso_shared); }
     int kind = line[0] == 'S' ? 0 : line[0] == 'R' ? 1 : line[0] == 'C' ? 2 : -1;
+    if (kind >= 0 && [g_pso_shipped_seen containsObject:k]) kind = -1;   // from the shared list (and its archive): not new
     if (kind >= 0) { atomic_fetch_add(&g_collect_new[kind], 1); atomic_store(&g_collect_last_ns, clock_gettime_nsec_np(CLOCK_UPTIME_RAW)); }
 }
 // 从 .metallib 文件建库，不常驻占文件描述符：newLibraryWithURL 在库对象活着期间一直开着那个文件（每个游戏着色器一个——iOS 包进局常驻 258 个描述符里 213 个是它，
@@ -5549,9 +5586,11 @@ static void treg_sweep_replaced(void) {
    are still in guest memory, so a copy that no submission resolved for a while can be dropped and uploaded again when it
    is used next. Only mirrored copies the GPU never rendered into (pk->owned: the pool bytes are stale) and that are
    larger than the content-hashed small textures are dropped, least recently used first.
-   When: iOS, the app's remaining allowance (os_proc_available_memory) below TOTK_TEX_EVICT_LOW_MB (600): drop until
-   TOTK_TEX_EVICT_HIGH_MB (850) would be available; copies idle for EVICT_IDLE submissions, or EVICT_IDLE_CRIT below
-   TOTK_TEX_EVICT_CRIT_MB (300). Any platform: TOTK_TEX_EVICT_MB=<n> keeps the copies under n MB (tests on the Mac).
+   When: iOS, the app's remaining allowance (os_proc_available_memory) below TOTK_TEX_EVICT_LOW_MB (250): drop until
+   TOTK_TEX_EVICT_HIGH_MB (350) would be available; copies idle for EVICT_IDLE submissions, or EVICT_IDLE_CRIT below
+   TOTK_TEX_EVICT_CRIT_MB (150). With 600 / 850 an iPhone 14 in the world sat at 300-470 MB for minutes: 22,000 copies
+   (2.8 GB) dropped in 80 s, 94% of them uploaded again, the main cause of its long frames (2026-10-23). Before that,
+   idle copies are made purgeable (pkg_purge_idle): the system takes them only when it needs the memory. Any platform: TOTK_TEX_EVICT_MB=<n> keeps the copies under n MB (tests on the Mac).
    TOTK_TEX_EVICT=0 turns it off. Runs between submissions on the replay thread, every 4 submissions. */
 #define EVICT_IDLE 90
 #define EVICT_IDLE_CRIT 8
@@ -5590,11 +5629,66 @@ static void pkg_orphan_report(void) {
     MLOG("素材贴图副本 至提交 %llu：在册 %zu 个 / %llu MB，其中所在内存池已删 %llu 个 / %llu MB", (unsigned long long)g_sub_serial, n, (unsigned long long)(total >> 20),
          (unsigned long long)orphan_n, (unsigned long long)(orphan_b >> 20));
 }
+/* TOTK (iPhone): copies idle for PURGE_IDLE submissions are marked purgeable (MTLPurgeableStateVolatile) instead of being
+   dropped: the system takes their memory only when it needs it, and memory marked so is not counted against the app's
+   allowance. Like a dropped copy, its serial is bumped and the texture-pool views on it cleared, so the next use goes
+   through tex_mtl, which makes it non-purgeable before any use and uploads it again from the pool bytes if it was taken
+   (pkg_unpurge). Only copies the eviction may drop (not rendered into by the GPU, not content-hashed). Every 16
+   submissions on the replay thread, as the eviction. TOTK_TEX_PURGE=0 turns it off. */
+#define PURGE_IDLE 90
+static uint64_t g_purge_marked, g_purge_marked_mb, g_purge_kept, g_purge_taken;
+static void pkg_unpurge(NvPkg *pk) {   // tex_mtl, before the copy is used (replay thread)
+    int lost = pk->lost; pk->vol = pk->lost = 0;
+    if (!pk->tex) return;
+    if (!lost && [pk->tex setPurgeableState:MTLPurgeableStateNonVolatile] != MTLPurgeableStateEmpty) { g_purge_kept++; return; }
+    id<MTLTexture> t = pk->tex; pk->tex = nil; g_purge_taken++;   // the system took it: tex_mtl uploads it again from the pool bytes
+    defer_obj_release(t);
+}
+static void treg_merge_used_locked(void) {   // texture-pool ids resolved on the fast path count as uses of their serial's copy
+    for (int i = 0; i < g_ntreg; i++) {
+        treg_t *r = &g_treg[i]; if (!r->ok || r->view_pkg != 1 || !r->used) continue;
+        __unsafe_unretained id o = hm_get_id(&g_by_serial, &r->t.serial);
+        if ([o isKindOfClass:[NvPkg class]] && r->used > ((NvPkg *)o)->used) ((NvPkg *)o)->used = r->used;
+    }
+}
+static void treg_clear_pkg_views_locked(int (*gone)(NvPkg *)) {   // texture-pool slot views on copies that may no longer be used directly
+    for (int i = 0; i < g_ntreg; i++) {
+        treg_t *r = &g_treg[i]; if (!r->view || r->view_pkg != 1) continue;
+        __unsafe_unretained id holder = hm_get_id(&g_by_serial, &r->t.serial);
+        if ([holder isKindOfClass:[NvPkg class]] && gone((NvPkg *)holder)) treg_clear_view_locked(i);
+    }
+}
+static int pkg_dropped(NvPkg *pk) { return !pk->tex; }
+static int pkg_purgeable(NvPkg *pk) { return pk->vol; }
+static void pkg_purge_idle(void) {
+    static int on = -1; if (on < 0) { const char *e = getenv("TOTK_TEX_PURGE"); on = TARGET_OS_IPHONE && !(e && !atoi(e)); if (on) MLOG("贴图副本可清除：开（闲置 ≥%d 次提交的副本交给系统，缺内存时由系统回收；TOTK_TEX_PURGE=0 关）", PURGE_IDLE); }
+    if (!on || (g_sub_serial & 15)) return;
+    uint64_t k = 0, bytes = 0;
+    registry_lock();
+    pthread_mutex_lock(&g_smu);
+    treg_merge_used_locked();
+    for (uint32_t i = 0; i < g_by_serial.cap; i++) {
+        __unsafe_unretained id o = (__bridge id)g_by_serial.vals[i];
+        if (!o || ![o isKindOfClass:[NvPkg class]]) continue;
+        NvPkg *pk = (NvPkg *)o; if (!pk->tex || pk->vol || pk->owned || pk->hashed || pk->used + PURGE_IDLE > g_sub_serial) continue;
+        [pk->tex setPurgeableState:MTLPurgeableStateVolatile]; pk->vol = 1;
+        uint64_t ser; memcpy(&ser, g_by_serial.keys + (size_t)i * g_by_serial.klen, 8); ser_bump_locked(ser);
+        k++; bytes += pk->tex.allocatedSize;
+    }
+    if (k) treg_clear_pkg_views_locked(pkg_purgeable);
+    pthread_mutex_unlock(&g_smu);
+    registry_unlock();
+    g_purge_marked += k; g_purge_marked_mb += bytes >> 20;
+    static uint64_t last; if (g_sub_serial - last >= 600 && g_purge_marked) { last = g_sub_serial;
+        MLOG("贴图副本可清除：累计标记 %llu 张 / %llu MB，用到时改回 %llu 张，其中被系统回收、重传 %llu 张",
+             (unsigned long long)g_purge_marked, (unsigned long long)g_purge_marked_mb, (unsigned long long)(g_purge_kept + g_purge_taken), (unsigned long long)g_purge_taken); }
+}
 static void pkg_evict_sweep(void) {
+    pkg_purge_idle();
     static int mode = -1; static uint64_t budget, low, high, crit;
     if (mode < 0) {
         const char *e = getenv("TOTK_TEX_EVICT");
-        budget = env_mb("TOTK_TEX_EVICT_MB", 0); low = env_mb("TOTK_TEX_EVICT_LOW_MB", 600); high = env_mb("TOTK_TEX_EVICT_HIGH_MB", 850); crit = env_mb("TOTK_TEX_EVICT_CRIT_MB", 300);
+        budget = env_mb("TOTK_TEX_EVICT_MB", 0); low = env_mb("TOTK_TEX_EVICT_LOW_MB", 250); high = env_mb("TOTK_TEX_EVICT_HIGH_MB", 350); crit = env_mb("TOTK_TEX_EVICT_CRIT_MB", 150);
         mode = e && !atoi(e) ? 0 : budget ? 2 : TARGET_OS_IPHONE ? 1 : 0;
         if (mode == 1) MLOG("贴图副本淘汰：开（可用内存低于 %llu MB 时淘汰久未使用的副本，直到 %llu MB；TOTK_TEX_EVICT=0 关）", (unsigned long long)(low >> 20), (unsigned long long)(high >> 20));
         if (mode == 2) MLOG("贴图副本淘汰：开（副本总量上限 %llu MB）", (unsigned long long)(budget >> 20));
@@ -5604,12 +5698,7 @@ static void pkg_evict_sweep(void) {
     if (mode == 1) { avail = evict_available(); if (!avail || avail >= low) return; want = high - avail; }
     registry_lock();
     pthread_mutex_lock(&g_smu);
-    /* texture-pool ids resolved on the fast path count as uses of their serial's copy */
-    for (int i = 0; i < g_ntreg; i++) {
-        treg_t *r = &g_treg[i]; if (!r->ok || r->view_pkg != 1 || !r->used) continue;
-        __unsafe_unretained id o = hm_get_id(&g_by_serial, &r->t.serial);
-        if ([o isKindOfClass:[NvPkg class]] && r->used > ((NvPkg *)o)->used) ((NvPkg *)o)->used = r->used;
-    }
+    treg_merge_used_locked();
     size_t n = 0, cap = 0; evict_cand *c = NULL; uint64_t total = 0, total_n = 0;
     NSUInteger fmt_pf[16]; uint64_t fmt_b[16], fmt_n[16]; int nfmt = 0;   // copies by Metal pixel format (log)
     uint64_t idle = mode == 1 && avail < crit ? EVICT_IDLE_CRIT : EVICT_IDLE;
@@ -5636,11 +5725,7 @@ static void pkg_evict_sweep(void) {
             freed += c[k].bytes;
         }
         /* texture-pool slot views hold the dropped copies (or views on them): clear them like treg_sweep_replaced */
-        if (k) for (int i = 0; i < g_ntreg; i++) {
-            treg_t *r = &g_treg[i]; if (!r->view || r->view_pkg != 1) continue;
-            __unsafe_unretained id holder = hm_get_id(&g_by_serial, &r->t.serial);
-            if ([holder isKindOfClass:[NvPkg class]] && !((NvPkg *)holder)->tex) treg_clear_view_locked(i);
-        }
+        if (k) treg_clear_pkg_views_locked(pkg_dropped);
     }
     pthread_mutex_unlock(&g_smu);
     registry_unlock();
@@ -6741,7 +6826,6 @@ static id<MTLRenderPipelineState> pso_new(MTLRenderPipelineDescriptor *d, NSStri
     }
     if (key && g_par_on) par_count(0);
     ps = [g_dev newRenderPipelineStateWithDescriptor:d error:e];
-    atomic_store(&g_par_last_compile_ns, clock_gettime_nsec_np(CLOCK_UPTIME_RAW));
     if (ps) par_add(g_dev, key, d);
     return ps;
 }
@@ -6758,7 +6842,6 @@ static id<MTLComputePipelineState> cs_new(NvShader *cs, NSError **e) {
     }
     if (g_par_on) par_count(0);
     ps = [g_dev newComputePipelineStateWithDescriptor:d options:MTLPipelineOptionNone reflection:nil error:e];
-    atomic_store(&g_par_last_compile_ns, clock_gettime_nsec_np(CLOCK_UPTIME_RAW));
     if (ps) par_add(g_dev, key, d);
     return ps;
 }
@@ -6956,27 +7039,28 @@ static int pso_pend_state(const pso_key *k) {   // -1 not predicted, 0 compiling
 }
 /* A new pipeline into the cache and the warm lists (submit thread). */
 /* Render pipelines into the player's contribution file, collected with the shaders (user 2026-10-22): one the game builds
-   in play that the app's warm-up lists (pso_title.tsv, pso_manifest.tsv) lack, with its border recipe, its shaders named
+   in play that the app's warm-up lists (pso_title.tsv, pso_manifest.tsv, and on iOS pso_list.tsv) lack, with its border recipe, its shaders named
    as another player's build names them (totk_rt_portable_variant). On a serial background queue: the renaming takes the
    translation lock and the file is appended to (a file write on the submit thread cost 10-30 ms). */
 static void pso_contribute(const pso_skey *sk, NSString *brec) {
-    static int on = -1; static dispatch_queue_t q; static NSSet<NSString *> *shipped;
+    static int on = -1; static dispatch_queue_t q; static NSSet<NSNumber *> *shipped;   // seen_key of the lists' R rows
     if (on < 0) { on = totk_rt_contrib_on(); if (on) q = dispatch_queue_create("totk.pso-contrib", DISPATCH_QUEUE_SERIAL); }
     if (!on) return;
     pso_skey copy = *sk; NSString *dir = g_shmap_path.stringByDeletingLastPathComponent;
     dispatch_async(q, ^{
         if (!shipped) {
             NSMutableSet *rows = [NSMutableSet set];
-            for (NSString *name in @[@"pso_title.tsv", @"pso_manifest.tsv"]) {
+            for (NSString *name in @[@"pso_title.tsv", @"pso_manifest.tsv", @"pso_list.tsv"]) @autoreleasepool {   // pso_list: iOS's copy of the shared list's pipelines
                 NSString *text = dir ? [NSString stringWithContentsOfFile:[dir stringByAppendingPathComponent:name] encoding:NSUTF8StringEncoding error:nil] : nil;
                 for (NSString *line in [text componentsSeparatedByString:@"\n"]) {
                     NSArray *f = [line componentsSeparatedByString:@"\t"];
-                    if (f.count >= 2 && [f[0] isEqual:@"R"]) [rows addObject:[@"R\t" stringByAppendingString:f[1]]];
+                    if (f.count >= 2 && [f[0] isEqual:@"R"]) [rows addObject:seen_key_str([@"R\t" stringByAppendingString:f[1]])];
                 }
             }
             shipped = rows;
         }
         pso_skey key = copy;
+        char local[sizeof key * 2 + 1]; pso_skey_hex(&key, local);   // as this build names its shaders: the exported lists are renamed so (shader_list.py rename)
         for (int st = 0; st < 2; st++) {
             char *field = st ? key.fs : key.vs;
             NSString *name = [[NSString alloc] initWithBytes:field length:strnlen(field, sizeof key.vs) encoding:NSASCIIStringEncoding];
@@ -6987,7 +7071,7 @@ static void pso_contribute(const pso_skey *sk, NSString *brec) {
         }
         char hexs[sizeof key * 2 + 1]; pso_skey_hex(&key, hexs);
         NSString *row = [NSString stringWithFormat:@"R\t%s", hexs];
-        if ([shipped containsObject:row]) return;
+        if ([shipped containsObject:seen_key_str(row)] || [shipped containsObject:seen_key_str([NSString stringWithFormat:@"R\t%s", local])]) return;
         totk_rt_contrib_line(row);
         if (brec) totk_rt_contrib_line([NSString stringWithFormat:@"B\t%s\t%@", hexs, brec]);
     });
@@ -7378,6 +7462,10 @@ static void warm_worker(NSArray<NSString *> *paths, NSArray<NSString *> *files,
         NSUInteger path_index = 0;
         MLOG("后台预热：着色器库用 %d 个线程编（TOTK_WARM_THREADS），进世界后最多 2 个", warm_threads());
         g_variant_bg = 1;   // patched variants pso_desc and warm_border compile here are no stall (variant_library)
+        /* A pipeline the archive lacks (one met in play last time, from pso_user.tsv) goes into it as soon as this compiled
+           it, so the next start takes it from there (par_add). Before, play-time pipelines waited for an idle moment in the
+           world, which an iPhone never reported, and every start compiled them again (763, 2026-10-22). */
+        par_write_in_place = 1;
         uint64_t done = 0;
         for (NSString *path in paths) {
             NSString *txt = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil];
@@ -7490,7 +7578,7 @@ static void warm_worker(NSArray<NSString *> *paths, NSArray<NSString *> *files,
              (unsigned long long)atomic_load(&g_warm_pipeline_count),atomic_load(&g_warm_pipeline_ns)/1e6);
         MLOG("预热库来源：预编译 %llu 次，源码编译 %llu 次", (unsigned long long)atomic_load(&g_rt_prebuilt), (unsigned long long)atomic_load(&g_rt_compiled));
     }
-    g_variant_bg = 0;
+    g_variant_bg = 0; par_write_in_place = 0;   // a queue thread: other work may run on it next
     atomic_store(&g_warm_running, 0);
     if (runtime_warm_done) runtime_warm_done();
 }
@@ -7545,10 +7633,6 @@ static void warm_filled(void) {
    cache take a few ms each. TOTK_WARM_LIGHT=0 turns it off. */
 static _Atomic int g_world_on;   // set at the first world frame (hle_nvn.c, nvnQueuePresentTexture)
 void mtl_note_world(void) { atomic_store(&g_world_on, 1); }
-static int par_game_idle(void) {   // totk_pipeline_archive.h: additions to the archive wait for this
-    return atomic_load(&g_world_on) && !atomic_load(&g_warm_running) &&
-           clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - atomic_load(&g_par_last_compile_ns) > PAR_IDLE_NS;
-}
 static void warm_light(void) {
 #if TARGET_OS_IPHONE
     const char *e = getenv("TOTK_WARM_LIGHT"); if (e && !atoi(e)) return;
@@ -7591,10 +7675,17 @@ static void warm_light(void) {
    skipped (it keeps about 450 MB, and with the archive filling at the same time the game passed the 4 GB limit,
    2026-10-20). Instead the pipeline lists are made one by one in the background, added to the archive and dropped;
    every PAR_SAVE_EVERY of them the archive is written and opened again from the file. The next start finds it valid. */
-static void warm_fill_archive(NSArray<NSString *> *paths) {
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_BACKGROUND, 0), ^{
-        uint64_t t0 = bp_now(), nr = 0, nc = 0, nfail = 0; NSMutableSet<NSString *> *seen = [NSMutableSet set];
-        atomic_store(&par_filling, 1); par_on_fill_thread = 1;
+// done: signalled at the end; the start waits for it before the title (warm_before_title), so it runs at a higher priority
+// and shows its progress on the start-up screen.
+static NSArray<NSString *> *g_shared_fill;   // warm_shared(): lists written into the archive only, before the title
+static void warm_fill_archive(NSArray<NSString *> *paths, dispatch_semaphore_t done) {
+    dispatch_async(dispatch_get_global_queue(done ? QOS_CLASS_USER_INITIATED : QOS_CLASS_BACKGROUND, 0), ^{
+        uint64_t t0 = bp_now(), nr = 0, nc = 0, nfail = 0, rows = 0, at = 0, nhave = 0; NSMutableSet<NSString *> *seen = [NSMutableSet set];
+        if (done) for (NSString *path in paths) @autoreleasepool {
+            for (NSString *line in [[NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil] componentsSeparatedByString:@"\n"])
+                rows += [line hasPrefix:@"R\t"] || [line hasPrefix:@"C\t"];
+        }
+        atomic_store(&par_filling, 1); par_write_in_place = 1;
         NSMutableDictionary<NSString *, NvShader *> *dict = [NSMutableDictionary dictionary];
         MLOG("管线存档：后台填充开始（%lu 份管线清单，每条建完写成自己的文件就丢）", (unsigned long)paths.count);
         for (NSString *path in paths) {
@@ -7604,14 +7695,23 @@ static void warm_fill_archive(NSArray<NSString *> *paths) {
                 [seen addObject:line];
                 NSArray<NSString *> *c = [line componentsSeparatedByString:@"\t"];
                 id ps = nil; int tried = 0;
+                if (([c[0] isEqualToString:@"R"] || [c[0] isEqualToString:@"C"]) && done && runtime_warm_progress && !(++at % 32)) runtime_warm_progress(at, rows, 0, 0, at, rows);
                 if ([c[0] isEqualToString:@"R"] && c.count >= 2) {
                     pso_skey sk; if (pso_skey_parse(c[1].UTF8String, &sk) || sk.fz) continue;
+                    /* already in the archive: nothing to make (the key pso_archive_key gives a warm-built one: no fragment
+                       state description); a start then reads the list without loading a shader */
+                    pso_skey ak = sk; memset(&ak.fz_desc, 0, sizeof ak.fz_desc);
+                    pthread_mutex_lock(&g_par_mu); BOOL have = [g_par_have containsObject:par_hash(&ak, sizeof ak)]; pthread_mutex_unlock(&g_par_mu);
+                    if (have) { nhave++; continue; }
                     NSString *vkey = warm_key(sk.vs, sizeof sk.vs), *fkey = warm_key(sk.fs, sizeof sk.fs);
                     NvShader *vs = vkey.length ? warm_shader(dict, vkey, sk.vs_stage) : nil, *fs = fkey.length ? warm_shader(dict, fkey, sk.fs_stage) : nil;
                     if (!vs || (fkey.length && !fs)) { nfail++; continue; }
                     pso_key k = sk.k; k.vs = (__bridge void *)vs; k.fs = (__bridge void *)fs; k.fsfn = NULL;
                     NSError *er = nil; ps = pso_new(pso_desc(&k, vs, fs, nil, sk.merged), pso_archive_key(&k, vs, fs, sk.merged), &er); tried = 1; nr += ps != nil;
                 } else if ([c[0] isEqualToString:@"C"] && c.count >= 2 && [c[1] length]) {
+                    const char *ck = c[1].UTF8String;
+                    pthread_mutex_lock(&g_par_mu); BOOL have = [g_par_have containsObject:[@"c" stringByAppendingString:par_hash(ck, strlen(ck))]]; pthread_mutex_unlock(&g_par_mu);
+                    if (have) { nhave++; continue; }
                     NvShader *cs = warm_shader(dict, c[1], 5); if (!cs) { nfail++; continue; }
                     NSError *er = nil; ps = cs_new(cs, &er); tried = 1; nc += ps != nil;
                 } else continue;
@@ -7620,9 +7720,10 @@ static void warm_fill_archive(NSArray<NSString *> *paths) {
             }
         }
         [dict removeAllObjects];
-        atomic_store(&par_filling, 0); par_on_fill_thread = 0;
-        MLOG("管线存档：后台填充完成，渲染管线 %llu 条、计算管线 %llu 条，失败 / 缺着色器 %llu，用时 %.1f s；下次启动从存档取",
-             nr, nc, nfail, (bp_now() - t0) / 1e9);
+        atomic_store(&par_filling, 0); par_write_in_place = 0;
+        if (done) dispatch_semaphore_signal(done);
+        MLOG("管线存档：填充完成，新建渲染管线 %llu 条、计算管线 %llu 条，存档里已有 %llu 条，失败 / 缺着色器 %llu，用时 %.1f s；下次启动从存档取",
+             nr, nc, nhave, nfail, (bp_now() - t0) / 1e9);
     });
 }
 static void warm_start(void) {
@@ -7681,6 +7782,11 @@ static void warm_start(void) {
         g_warm_pipelines_only = 1;
         cached = @[];
         if (g_par_valid) {
+            if (!warm_shared()) {   // the shared list goes into the archive, not into memory (warm_shared)
+                NSIndexSet *shared = [lists indexesOfObjectsPassingTest:^BOOL(NSString *p, NSUInteger i, BOOL *stop) { return [p.lastPathComponent isEqualToString:@"pso_list.tsv"]; }];
+                if (shared.count) { g_shared_fill = [lists objectsAtIndexes:shared]; [lists removeObjectsAtIndexes:shared];
+                    MLOG("预热：统一清单的管线只编进存档、不留在内存（TOTK_WARM_SHARED=1 留）"); }
+            }
             paths = lists;
             MLOG("预热：有管线存档，只建管线清单里的 %lu 份（不单独加载着色器库），其余用到时从存档取", (unsigned long)paths.count);
         } else {   // first run, memory short: only the title's pipelines are kept; the rest go into the archive in the background
@@ -7717,7 +7823,20 @@ static void warm_start(void) {
     warm_claim();
     MLOG("启动关键管线已就绪：等待 %d ms，可用着色器 %lu / 渲染管线 %llu / 计算管线 %llu；其余后台继续预热",
          ms, (unsigned long)g_shcache.count, g_warm_claim_rps, g_warm_claim_cps);
-    if (g_par_fill_lists) warm_fill_archive(g_par_fill_lists);
+    /* The title comes once the whole warm-up is done (user 2026-10-23: "预热 保存完才能进入标题"): every list's pipelines
+       made, those the archive lacked compiled and written into it (par_add), and on a first run the archive filled. Once
+       per new shader list it takes minutes on a phone (1,100 pipelines new in the archive after #229-#272); later starts
+       take them from the archive. The start-up screen shows the progress. TOTK_WARM_BEFORE_TITLE=0: the title after its
+       own list, the rest behind it (before 2026-10-23). */
+    const char *bt = getenv("TOTK_WARM_BEFORE_TITLE");
+    if (!(bt && !atoi(bt))) {
+        uint64_t t1 = bp_now();
+        while (atomic_load(&g_warm_running)) usleep(5000);
+        warm_claim();
+        NSArray *fill = g_par_fill_lists ? g_par_fill_lists : g_shared_fill;
+        if (fill) { dispatch_semaphore_t d = dispatch_semaphore_create(0); warm_fill_archive(fill, d); dispatch_semaphore_wait(d, DISPATCH_TIME_FOREVER); g_par_fill_lists = g_shared_fill = nil; }
+        MLOG("预热和管线存档完成后才进标题：又等了 %.1f s，可用渲染管线 %llu / 计算管线 %llu", (bp_now() - t1) / 1e9, g_warm_claim_rps, g_warm_claim_cps);
+    } else if (g_par_fill_lists || g_shared_fill) warm_fill_archive(g_par_fill_lists ? g_par_fill_lists : g_shared_fill, nil);
 }
 static int g_rt_ovr;   // 运行时外推的模板覆盖：0 不覆盖；1 只在单位 / 特效 / 外推洞位（0xD0）上通过、不写模板；3 照常深度测试，通过处写特效位 0x40 | Stencil override for runtime extrapolation: 0 no override; 1 pass only on the unit / effect / extrapolation-hole bits (0xD0), no stencil write; 3 depth test as usual, write the effect bit 0x40 where it passes
 static id<MTLDepthStencilState> dss_get(int has_depth, int has_stencil) {
