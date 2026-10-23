@@ -174,25 +174,27 @@
 		</dict>
 		<dict>
 			<key>Type</key>
-			<string>PSRadioGroupSpecifier</string>
+			<string>PSToggleSwitchSpecifier</string>
 			<key>Key</key>
-			<string>TOTK_HUD_MODE</string>
+			<string>TOTK_FPS_OVERLAY</string>
 			<key>Title</key>
-			<string>状态行 · Status line</string>
+			<string>状态行（右上角）· Status line (top-right)</string>
 			<key>DefaultValue</key>
-			<string>all</string>
-			<key>Values</key>
-			<array>
-				<string>all</string>
-				<string>off</string>
-			</array>
-			<key>Titles</key>
-			<array>
-				<string>显示（FPS、MetalFX、分辨率）· Show</string>
-				<string>关闭（更沉浸）· Off</string>
-			</array>
+			<true/>
 			<key>FooterText</key>
-			<string>开启时右上角显示帧率、MetalFX 状态和分辨率，行尾是待补译的着色器数量；关闭后整行隐藏 · shows FPS, MetalFX and resolution in the top-right, with the number of shaders waiting for translation; off hides the line</string>
+			<string>显示帧率、上屏尺寸和 MetalFX 是否生效；行尾是待补译的着色器数量 · shows the frame rate, the presented size and whether MetalFX is upscaling, ending with the number of shaders waiting for translation</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSToggleSwitchSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_SHADER_OVERLAY</string>
+			<key>Title</key>
+			<string>着色器与管线（左下角）· Shaders and pipelines (bottom-left)</string>
+			<key>DefaultValue</key>
+			<true/>
+			<key>FooterText</key>
+			<string>显示本次新翻译的着色器 / 缓存总数，以及本次新建的渲染管线；收集到新东西时会变黄 · shows the shaders translated this run against the cache total, plus the render pipelines built this run; it turns yellow when something new is collected</string>
 		</dict>
 		<dict>
 			<key>Type</key>

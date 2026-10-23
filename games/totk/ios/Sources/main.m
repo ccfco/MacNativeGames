@@ -268,16 +268,32 @@ static void apply_settings(void) {
         [d setObject:scene forKey:@"TOTK_RENDER_RES"];
     }
     setenv("TOTK_RENDER_RES", scene.UTF8String, env_valid ? 0 : 1);
+    /* One switch per overlay: the status line in the top-right corner and the shader/pipeline counts in the bottom-left.
+       The runtime gates both with one mode and draws the counts only in "all", so the mode follows the switches. */
+    if (!stored[@"TOTK_FPS_OVERLAY"] && !stored[@"TOTK_SHADER_OVERLAY"] && [stored[@"TOTK_HUD_MODE"] isEqualToString:@"off"]) {
+        [d setBool:NO forKey:@"TOTK_FPS_OVERLAY"];
+        [d setBool:NO forKey:@"TOTK_SHADER_OVERLAY"];
+        fprintf(stderr, "[totk] settings: the old status line was off -> both overlays off\n");
+    }
+    totk_hud_env henv;
+    totk_hud_env_build((int)[d boolForKey:@"TOTK_FPS_OVERLAY"], (int)[d boolForKey:@"TOTK_SHADER_OVERLAY"], &henv);
+    setenv("TOTK_HUD_MODE", henv.hud_mode, 1);
+    setenv("TOTK_FPS_OVERLAY", henv.fps_overlay, 1);
+    setenv("TOTK_SHADER_OVERLAY", henv.shader_overlay, 1);
+    /* The keep-alive spin kernels hold the GPU clock up between frames. On a fanless iPad that buys nothing the game
+       can use and only adds heat (measured: replay CPU 11-12 ms with it, 6.8-7.5 ms without), so the app starts with
+       it off; a devicectl TOTK_GPU_KEEPALIVE still overrides for a measurement. */
+    setenv("TOTK_GPU_KEEPALIVE", "0", 0);
     NSString *drawable = [NSString stringWithUTF8String:penv.drawable];
     /* getenv, not the stored switches: the picture mode may have overridden them. */
-    fprintf(stderr, "[totk] settings: picture %s, display %s, scene %s, fps %s, interp %d (hz %s, fps %s, mfx %s), aspect %s, hud %s, taa %d, mfx %s/%s, full %s, keyboard %s, touch-with-keyboard %d, backup %d\n",
+    fprintf(stderr, "[totk] settings: picture %s, display %s, scene %s, fps %s, interp %d (hz %s, fps %s, mfx %s), aspect %s, hud %s/%s, taa %d, mfx %s/%s, full %s, keyboard %s, touch-with-keyboard %d, backup %d\n",
             picture.UTF8String ?: "mfx",
             drawable.UTF8String ?: "?",
             scene.UTF8String ?: "?",
             cap.UTF8String ?: "60", (int)interp,
             getenv("DM_PRESENT_HZ") ?: "-", getenv("DM_FPS") ?: "-", getenv("TOTK_MFX") ?: "-",
             [[d stringForKey:@"TOTK_ASPECT"] UTF8String] ?: "?",
-            [[d stringForKey:@"TOTK_HUD_MODE"] UTF8String] ?: "all",
+            getenv("TOTK_FPS_OVERLAY") ?: "1", getenv("TOTK_SHADER_OVERLAY") ?: "1",
             (int)[d boolForKey:@"TOTK_TAA"],
             getenv("TOTK_MFX_UPSCALE") ?: "1", getenv("TOTK_MFX_OUTPUT") ?: "1",
             getenv("TOTK_IOS_OUTPUT_FULL") ?: "0",

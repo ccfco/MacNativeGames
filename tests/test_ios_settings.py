@@ -56,3 +56,14 @@ class IOSSettings(unittest.TestCase):
         picture_default, frame_default = run.stdout.splitlines()
         self.assertEqual(picture_default, rows['TOTK_IOS_PICTURE_MODE']['DefaultValue'])
         self.assertEqual(frame_default, rows['TOTK_FPS_CAP']['DefaultValue'])
+
+    def test_overlays_are_separate_switches(self):
+        with open(ROOT / 'games/totk/ios/Settings.bundle/Root.plist', 'rb') as file:
+            root = plistlib.load(file)
+        rows = {item['Key']: item for item in root['PreferenceSpecifiers'] if 'Key' in item}
+        # The runtime's single mode is derived from the two switches, so the pane must not offer a third state.
+        self.assertNotIn('TOTK_HUD_MODE', rows)
+        for key in ('TOTK_FPS_OVERLAY', 'TOTK_SHADER_OVERLAY'):
+            self.assertIn(key, rows)
+            self.assertEqual(rows[key]['Type'], 'PSToggleSwitchSpecifier')
+            self.assertIs(rows[key]['DefaultValue'], True)

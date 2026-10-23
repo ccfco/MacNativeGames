@@ -43,3 +43,11 @@ int totk_frame_env_build(const char *cap, int interpolate, totk_frame_env *out) 
    1280x720 on the same draw count). Must match Root.plist's DefaultValue; tests/test_ios_settings.py checks that. */
 const char *totk_picture_mode_default(void) { return "720"; }
 const char *totk_frame_cap_default(void) { return "60"; }
+
+/* The runtime gates both overlays with one mode and draws the counts only in "all" (gfx/nvn/fps_overlay.c), so the
+   pane's two switches fold back into that mode here instead of leaving a third state the player cannot see. */
+void totk_hud_env_build(int status_line, int shader_counts, totk_hud_env *out) {
+    out->hud_mode = status_line || shader_counts ? "all" : "off";
+    out->fps_overlay = status_line ? "1" : "0";
+    out->shader_overlay = shader_counts ? "1" : "0";
+}

@@ -47,6 +47,16 @@ static int frame_cap_accepts(const char *cap) {
     return totk_frame_env_build(cap, 0, &off) && totk_frame_env_build(cap, 1, &on) && off.interp && on.interp;
 }
 
+static void hud(int status_line, int counts, const char *mode, const char *fps, const char *shaders) {
+    totk_hud_env e;
+    totk_hud_env_build(status_line, counts, &e);
+    if (strcmp(e.hud_mode, mode) || strcmp(e.fps_overlay, fps) || strcmp(e.shader_overlay, shaders)) {
+        failures++;
+        fprintf(stderr, "hud %d/%d: %s/%s/%s, want %s/%s/%s\n", status_line, counts,
+                e.hud_mode, e.fps_overlay, e.shader_overlay, mode, fps, shaders);
+    }
+}
+
 int main(int argc, char **argv) {
     if (argc == 3 && !strcmp(argv[1], "--picture")) {
         if (picture_accepts(argv[2])) return 0;
@@ -91,6 +101,11 @@ int main(int argc, char **argv) {
     if (totk_frame_env_build("90", 0, &f) || totk_frame_env_build(NULL, 0, &f) || strcmp(f.present_hz, "keep")) {
         failures++; fprintf(stderr, "unknown frame caps must be rejected without touching the result\n");
     }
+    /* The runtime draws the counts only in its "all" mode, so any overlay that is on has to raise the mode. */
+    hud(1, 1, "all", "1", "1");
+    hud(1, 0, "all", "1", "0");
+    hud(0, 1, "all", "0", "1");
+    hud(0, 0, "off", "0", "0");
     /* The values themselves belong to Root.plist (test_ios_settings.py compares them); here only that the defaults are
        modes the pane can actually produce. */
     if (!picture_accepts(totk_picture_mode_default()) || !frame_cap_accepts(totk_frame_cap_default())) {
