@@ -55,16 +55,18 @@
 				<string>1920x1080</string>
 				<string>1280x720</string>
 				<string>960x540</string>
+				<string>800x450</string>
 			</array>
 			<key>Titles</key>
 			<array>
-				<string>1600x900（推荐）· 1600x900 (recommended)</string>
-				<string>1920x1080（清晰，更热）· 1920x1080 (sharper, hotter)</string>
-				<string>1280x720（流畅，更凉）· 1280x720 (cooler)</string>
-				<string>960x540（最省电）· 960x540 (coolest)</string>
+				<string>1600x900（清晰）· 1600x900 (sharper)</string>
+				<string>1920x1080（最清晰，最热）· 1920x1080 (sharpest, hottest)</string>
+				<string>1280x720（均衡，易掉帧）· 1280x720 (mixed, drops frames)</string>
+				<string>960x540（默认）· 960x540 (default)</string>
+				<string>800x450（最流畅，画面最软）· 800x450 (smoothest, softest)</string>
 			</array>
 			<key>FooterText</key>
-			<string>只影响 3D 世界，和画质模式独立。1920x1080 比 1600x900 多 44% 像素，发热明显；1280x720 / 960x540 更省电。重场景掉帧时优先降到 1280x720。 · Affects the 3D world only, independent of the picture mode. 1920x1080 renders 44% more pixels and runs hotter; 1280x720 / 960x540 are cooler. If busy areas drop frames, try 1280x720 first.</string>
+			<string>只影响 3D 世界，与画质模式独立。GPU 开销几乎与像素数成正比（2026-10-23 实测，60 帧档：960x540 12.9 ms，1280x720 26.2 ms）。大世界里 960x540 热机后会从 60 掉到 30；800x450 大约 8.9 ms，热机后仍能守住 60，代价是画面更软。 · Affects the 3D world only, independent of the picture mode. GPU cost is nearly linear in pixels (measured 2026-10-23 at 60 fps: 12.9 ms at 960x540, 26.2 ms at 1280x720). In heavy areas 960x540 drops from 60 to 30 once the SoC heats up; 800x450 costs about 8.9 ms and keeps 60, at the price of a softer picture.</string>
 		</dict>
 		<dict>
 			<key>Type</key>
