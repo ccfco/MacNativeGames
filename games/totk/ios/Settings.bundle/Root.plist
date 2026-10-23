@@ -32,13 +32,25 @@
 			</array>
 			<key>Titles</key>
 			<array>
-				<string>MetalFX 2K（推荐）· MetalFX 2K (recommended)</string>
+				<string>MetalFX 2K（文字最清楚）· MetalFX 2K (sharpest text)</string>
 				<string>原生 2K（最清晰，最热）· Native 2K (sharpest, hottest)</string>
 				<string>1080p（更凉）· 1080p (cooler)</string>
-				<string>720p（最省电）· 720p (lowest power)</string>
+				<string>720p（默认，最省电）· 720p (default, lowest power)</string>
 			</array>
 			<key>FooterText</key>
-			<string>MetalFX 2K：默认，1080p 画布用场景和输出两段 MetalFX 放大到面板，文字更清楚；1080p：约 1919x1323 显示缓冲，不做输出 MetalFX，更凉；原生 2K：使用构建时烘焙的画布（默认构建面向 11 英寸 M5 iPad，2420x1668），文字真正原生，3D 仍按场景分辨率渲染，发热最高，其他面板自动回退；720p：更小缓冲，最省电。 · MetalFX 2K: the default, a 1080p canvas upscaled to the panel by both MetalFX stages for clearer text; 1080p: about a 1919x1323 drawable with no output MetalFX, cooler; Native 2K: the canvas baked into this build (the default targets the 11-inch M5 iPad, 2420x1668) for native text (3D stays at the scene resolution; hottest; other panels fall back); 720p: a smaller drawable, lowest power.</string>
+			<string>MetalFX 2K：1080p 画布用场景和输出两段 MetalFX 放大到面板，文字更清楚；1080p：约 1919x1323 显示缓冲，不做输出 MetalFX，更凉；原生 2K：使用构建时烘焙的画布（默认构建面向 11 英寸 M5 iPad，2420x1668），文字真正原生，3D 仍按场景分辨率渲染，发热最高，其他面板自动回退；720p：更小缓冲，最省电。 · MetalFX 2K: a 1080p canvas upscaled to the panel by both MetalFX stages for clearer text; 1080p: about a 1919x1323 drawable with no output MetalFX, cooler; Native 2K: the canvas baked into this build (the default targets the 11-inch M5 iPad, 2420x1668) for native text (3D stays at the scene resolution; hottest; other panels fall back); 720p: a smaller drawable, lowest power.</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSToggleSwitchSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_MFX_UPSCALE</string>
+			<key>Title</key>
+			<string>场景超分 · Scene upscaling</string>
+			<key>DefaultValue</key>
+			<true/>
+			<key>FooterText</key>
+			<string>用 MetalFX 把 3D 场景放大到画布：画面更锐，代价是少量 GPU；关掉能再省一点。原生 2K 下由游戏自己的缩放填充画布，此开关不生效。重启游戏后生效 · MetalFX upscales the 3D scene into the canvas: sharper for a little GPU; off saves a little more. With Native 2K the game's own scaler fills the canvas, so the switch does nothing. Takes effect after relaunching</string>
 		</dict>
 		<dict>
 			<key>Type</key>

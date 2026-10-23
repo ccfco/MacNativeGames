@@ -1,19 +1,26 @@
 #include "settings_map.h"
 #include <string.h>
 
-/* 720p is the coolest mode, so it also turns the scene upscale off. Native 2K follows the Mac's key 3: the game's own
-   scaler takes the scene to the native canvas, and no MetalFX stage runs (the pane is hottest already). */
+/* The picture mode owns the canvas only: drawable height, output MetalFX and the baked native canvas. Whether the 3D
+   scene is upscaled on its way into that canvas is the pane's own switch (TOTK_MFX_UPSCALE), so 960x540 can be
+   sharpened into 720p without changing the mode. Native 2K follows the Mac's key 3: the game's own scaler takes the
+   scene to the native canvas, so the switch has nothing to do there and stays off. */
 static const struct { const char *mode; totk_picture_env env; } PICTURE[] = {
     {"720",    {"720", "0", "0", "0"}},
-    {"1080",   {"1080", "1", "0", "0"}},
-    {"mfx",    {"0", "1", "1", "0"}},
+    {"1080",   {"1080", "0", "0", "0"}},
+    {"mfx",    {"0", "0", "1", "0"}},
     {"native", {"0", "0", "0", "1"}},
 };
 
-int totk_picture_env_parse(const char *mode, totk_picture_env *out) {
+int totk_picture_env_build(const char *mode, int scene_upscale, totk_picture_env *out) {
     if (!mode) return 0;
-    for (unsigned i = 0; i < sizeof PICTURE / sizeof PICTURE[0]; i++)
-        if (!strcmp(PICTURE[i].mode, mode)) { *out = PICTURE[i].env; return 1; }
+    for (unsigned i = 0; i < sizeof PICTURE / sizeof PICTURE[0]; i++) {
+        if (strcmp(PICTURE[i].mode, mode)) continue;
+        totk_picture_env e = PICTURE[i].env;
+        e.scene_upscale = !strcmp(e.native_canvas, "1") ? "0" : (scene_upscale ? "1" : "0");
+        *out = e;
+        return 1;
+    }
     return 0;
 }
 

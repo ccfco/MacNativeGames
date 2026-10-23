@@ -5,13 +5,16 @@
 
 static int failures;
 
-static void picture(const char *mode, const char *drawable, const char *scene, const char *output, const char *native) {
+static void picture(const char *mode, int upscale, const char *drawable, const char *scene, const char *output,
+                    const char *native) {
     totk_picture_env e;
-    if (!totk_picture_env_parse(mode, &e)) { failures++; fprintf(stderr, "picture %s: not accepted\n", mode); return; }
+    if (!totk_picture_env_build(mode, upscale, &e)) {
+        failures++; fprintf(stderr, "picture %s/%d: not accepted\n", mode, upscale); return;
+    }
     if (strcmp(e.drawable, drawable) || strcmp(e.scene_upscale, scene) || strcmp(e.output_upscale, output) ||
         strcmp(e.native_canvas, native)) {
         failures++;
-        fprintf(stderr, "picture %s: %s/%s/%s/%s, want %s/%s/%s/%s\n", mode,
+        fprintf(stderr, "picture %s/%d: %s/%s/%s/%s, want %s/%s/%s/%s\n", mode, upscale,
                 e.drawable, e.scene_upscale, e.output_upscale, e.native_canvas, drawable, scene, output, native);
     }
 }
@@ -33,8 +36,10 @@ static void frame(const char *cap, int interp, const char *hz, const char *fps, 
 }
 
 static int picture_accepts(const char *mode) {
-    totk_picture_env e;
-    return totk_picture_env_parse(mode, &e) && e.drawable && e.scene_upscale && e.output_upscale && e.native_canvas;
+    totk_picture_env off, on;
+    return totk_picture_env_build(mode, 0, &off) && totk_picture_env_build(mode, 1, &on) &&
+           off.drawable && off.scene_upscale && off.output_upscale && off.native_canvas &&
+           on.drawable && on.scene_upscale && on.output_upscale && on.native_canvas;
 }
 
 static int frame_cap_accepts(const char *cap) {
@@ -61,13 +66,18 @@ int main(int argc, char **argv) {
         fprintf(stderr, "usage: %s [--picture MODE | --frame-cap CAP | --defaults]\n", argv[0]);
         return 2;
     }
-    picture("720", "720", "0", "0", "0");
-    picture("1080", "1080", "1", "0", "0");
-    picture("mfx", "0", "1", "1", "0");
-    picture("native", "0", "0", "0", "1");
+    /* The scene upscale is the pane's own switch: the mode decides the canvas, the switch decides MetalFX. */
+    picture("720", 0, "720", "0", "0", "0");
+    picture("720", 1, "720", "1", "0", "0");
+    picture("1080", 0, "1080", "0", "0", "0");
+    picture("1080", 1, "1080", "1", "0", "0");
+    picture("mfx", 0, "0", "0", "1", "0");
+    picture("mfx", 1, "0", "1", "1", "0");
+    picture("native", 0, "0", "0", "0", "1");
+    picture("native", 1, "0", "0", "0", "1");   /* the game's own scaler fills the native canvas: nothing to upscale */
     totk_picture_env p = {"keep", "keep", "keep", "keep"};
-    if (totk_picture_env_parse("custom", &p) || totk_picture_env_parse(NULL, &p) || totk_picture_env_parse("", &p) ||
-        strcmp(p.drawable, "keep")) {
+    if (totk_picture_env_build("custom", 1, &p) || totk_picture_env_build(NULL, 1, &p) ||
+        totk_picture_env_build("", 1, &p) || strcmp(p.drawable, "keep")) {
         failures++; fprintf(stderr, "unknown picture modes must be rejected without touching the result\n");
     }
 

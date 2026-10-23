@@ -16,8 +16,10 @@ typedef struct {
     const char *interp;          /* TOTK_MFX: "0", "interp30" (30 + 30) or "interp" (half the refresh rate) */
 } totk_frame_env;
 
-/* 1 when mode is one of the pane's values, 0 otherwise (out is untouched). */
-int totk_picture_env_parse(const char *mode, totk_picture_env *out);
+/* mode is one of the pane's picture values; scene_upscale is the pane's own MetalFX switch and is not tied to the
+   mode (the native canvas ignores it: there the game's scaler fills the canvas). 0 when mode is unknown (out is
+   untouched). */
+int totk_picture_env_build(const char *mode, int scene_upscale, totk_picture_env *out);
 /* cap is "30", "60" or "120"; interpolate adds one generated frame between game frames. 120 has no headroom, so
    interpolation there is the same as off. 0 when cap is not a pane value (out is untouched). */
 int totk_frame_env_build(const char *cap, int interpolate, totk_frame_env *out);

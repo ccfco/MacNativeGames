@@ -185,12 +185,13 @@ static void apply_settings(void) {
             fprintf(stderr, "[totk] settings: old drawable %s -> picture mode %s\n", old.UTF8String, migrated.UTF8String);
         }
     }
-    /* One picture mode owns the canvas, the drawable and the two MetalFX stages. It overwrites those keys because a
-       mode must not be contradicted by a key it owns. */
+    /* The picture mode owns the canvas and the drawable; the scene upscale is its own switch, so 960x540 can be
+       sharpened into 720p without changing the mode. The keys a mode owns are overwritten, never merely defaulted. */
     NSString *picture = [d stringForKey:@"TOTK_IOS_PICTURE_MODE"];
+    BOOL scene_upscale_on = [d boolForKey:@"TOTK_MFX_UPSCALE"];
     totk_picture_env penv;
-    totk_picture_env_parse(totk_picture_mode_default(), &penv);   // a valid fallback if the stored value is stale
-    if (!totk_picture_env_parse(picture.UTF8String, &penv)) {
+    totk_picture_env_build(totk_picture_mode_default(), (int)scene_upscale_on, &penv);   // fallback if the value is stale
+    if (!totk_picture_env_build(picture.UTF8String, (int)scene_upscale_on, &penv)) {
         fprintf(stderr, "[totk] settings: picture mode \"%s\" is not a pane value; using %s\n",
                 picture.UTF8String ?: "", totk_picture_mode_default());
         picture = [NSString stringWithUTF8String:totk_picture_mode_default()];
@@ -200,7 +201,7 @@ static void apply_settings(void) {
         fprintf(stderr, "[totk] settings: native 2K is baked for another panel (this one is %.0fx%.0f); using MetalFX 2K\n",
                 s.width, s.height);
         picture = @"mfx";
-        totk_picture_env_parse(picture.UTF8String, &penv);
+        totk_picture_env_build(picture.UTF8String, (int)scene_upscale_on, &penv);
     }
     setenv("TOTK_IOS_DRAWABLE_H", penv.drawable, 1);
     setenv("TOTK_MFX_UPSCALE", penv.scene_upscale, 1);
