@@ -10813,6 +10813,17 @@ static int mfxup_dock(__unsafe_unretained NvShader *fs) {
     g_mfxup_dock_n++; atomic_store(&g_mfxup_last, atomic_load(&g_cur_frame));
     return 1;
 }
+/* TOTK_MFX (iOS): the canvas is whatever the compose shader draws into. On macOS canvas_learn finds it by following the
+   presented texture's aspect ratio; nothing here renders into a presented texture first, so it was never found and the
+   frame interpolation captured no scene at all (interp30: 0 frames, "缺输入 9000"). */
+static void mfx_note_canvas_ios(const char *key) {
+    if (!mfx_enabled() || strncmp(key, "0ac9a54938974396", 16) || R.rt.n < 1 || !R.rt.color[0] ||
+        g_mfx.canvas == R.rt.color[0]->serial) return;
+    g_mfx.canvas = R.rt.color[0]->serial;
+    id<MTLTexture> c = tex_mtl(R.rt.color[0]);
+    MLOG("[mfx] 画布（iOS）：合成着色器的渲染目标 %llx（%lux%lu）", (unsigned long long)g_mfx.canvas,
+         (unsigned long)c.width, (unsigned long)c.height);
+}
 /* TOTK_MFX_UPSCALE: the game's compose shader 0ac9a549 (tone mapping and bloom into the canvas) samples the scene at
    texture slot 0; when that scene is smaller than the canvas (TOTK_RENDER_RES below the canvas size), upscale it with
    MetalFX first and let encode_args bind the result. Runs before the draw opens its render encoder. Docked: mfxup_dock.
@@ -10822,6 +10833,7 @@ static int mfxup_draw(NvProg *pr) {
     if (!pr) return 0;
     __unsafe_unretained NvShader *fs = pr->sh[1];
     if (!fs) return 0;
+    mfx_note_canvas_ios(fs->key);
     /* TOTK_TAA: the compose shader's scene goes through the MetalFX temporal scaler (1:1) first; encode_args binds the
        result, or the spatial upscale below takes it as its input when the scene is smaller than the canvas. The docked
        upscale (mfxup_dock) is a later draw of another shader and reads the composed picture: unaffected. */
@@ -13309,7 +13321,9 @@ static int present_now(const tex_t *t, double period, uint64_t frame, uint64_t t
     [g_q4 waitForDrawable:dr];
     id<MTL4CommandBuffer> cb = g_present_cb[alloc_i];
     [cb beginCommandBufferWithAllocator:g_present_alloc4[alloc_i]];
-    if (!present_encode_m4(cb, src, dr.texture, interp >= 0 ? NULL : crop, alloc_i)) { [cb endCommandBuffer]; [g_q4 signalDrawable:dr]; if (grab) grab(NULL); return 0; }   // the interpolated frame has the canvas size: no swapchain crop
+    /* TOTK_MFX: the interpolated frame has the canvas size, so it takes the same swapchain crop as a game frame and
+       lands on the same viewport. */
+    if (!present_encode_m4(cb, src, dr.texture, crop, alloc_i)) { [cb endCommandBuffer]; [g_q4 signalDrawable:dr]; if (grab) grab(NULL); return 0; }
     id<MTLBuffer> grab_buf = nil; size_t grab_w = dr.texture.width, grab_h = dr.texture.height;
     if (grab) {
         grab_buf = grab_w && grab_h ? [g_dev newBufferWithLength:grab_w * grab_h * 4 options:MTLResourceStorageModeShared] : nil;
