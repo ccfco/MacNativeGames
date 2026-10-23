@@ -56,6 +56,7 @@
 				<string>1280x720</string>
 				<string>960x540</string>
 				<string>800x450</string>
+				<string>640x360</string>
 			</array>
 			<key>Titles</key>
 			<array>
@@ -63,7 +64,8 @@
 				<string>1920x1080（最清晰，最热）· 1920x1080 (sharpest, hottest)</string>
 				<string>1280x720（均衡，易掉帧）· 1280x720 (mixed, drops frames)</string>
 				<string>960x540（默认）· 960x540 (default)</string>
-				<string>800x450（最流畅，画面最软）· 800x450 (smoothest, softest)</string>
+				<string>800x450（流畅，画面软）· 800x450 (smoother, soft)</string>
+				<string>640x360（最省 GPU，画面最软）· 640x360 (cheapest, softest)</string>
 			</array>
 			<key>FooterText</key>
 			<string>只影响 3D 世界，与画质模式独立。GPU 开销几乎与像素数成正比（2026-10-23 实测，60 帧档：960x540 12.9 ms，1280x720 26.2 ms）。大世界里 960x540 热机后会从 60 掉到 30；800x450 大约 8.9 ms，热机后仍能守住 60，代价是画面更软。 · Affects the 3D world only, independent of the picture mode. GPU cost is nearly linear in pixels (measured 2026-10-23 at 60 fps: 12.9 ms at 960x540, 26.2 ms at 1280x720). In heavy areas 960x540 drops from 60 to 30 once the SoC heats up; 800x450 costs about 8.9 ms and keeps 60, at the price of a softer picture.</string>
