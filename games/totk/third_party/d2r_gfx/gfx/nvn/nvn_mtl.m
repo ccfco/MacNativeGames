@@ -14940,6 +14940,17 @@ uint64_t mtl_present(const tex_t *t, double period, const int crop[4]) {
         }
     }
     pthread_mutex_lock(&g_pq_mu);
+    /* 省电模式（30 帧）：显示节拍每次只取队列里最新的一帧、把更早的直接丢掉（needsUpdate 里的 g_link_dropped）。只做这一半，
+       游戏仍按 60 帧生产、GPU 每秒干的活一点没少，发热不变——实测正是如此（上屏 33.33 ms 间隔，帧时间仍 16.58 ms）。
+       把队列压到「只排一帧」让游戏自己也等节拍，才是这个模式想要的效果。带超时：节拍不回调时不能把游戏卡死。 */
+    /* Power-saving mode (30 fps): the display link takes only the newest queued frame and drops the older ones (g_link_dropped
+       in needsUpdate). With that alone the game keeps producing 60 frames and the GPU does the same work per second, so the
+       heat does not drop - which is what the device showed (33.33 ms presents, 16.58 ms game frames). Holding the queue to one
+       waiting frame makes the game wait for the link too. Timed, so a display link that stops calling back cannot hang it. */
+    if (mtl_fps_target() == 30 && g_link_owns_layer) {
+        struct timespec until; clock_gettime(CLOCK_REALTIME, &until); until.tv_sec += 1;
+        while (g_pq_in - g_pq_done >= 2 && pthread_cond_timedwait(&g_pq_cv, &g_pq_mu, &until) != ETIMEDOUT) {}
+    }
     while (g_pq_in - g_pq_done >= PQ) pthread_cond_wait(&g_pq_cv, &g_pq_mu);   // 队满才等；正常由 AcquireTexture 先挡住 | Wait only when the queue is full; normally AcquireTexture blocks first
     pq_item *it = &g_pq[g_pq_in % PQ]; *it = (pq_item){*t, period, atomic_load(&g_cur_frame), {0}, CACurrentMediaTime(), islot, 0, 0, ring};
     if (crop) memcpy(it->crop, crop, sizeof it->crop);   // 当帧状态随票号入队，不在出图线程晚读可变window | The current frame's state is enqueued with the ticket number, rather than reading the mutable window late on the present thread
