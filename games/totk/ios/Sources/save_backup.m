@@ -1,4 +1,4 @@
-/* Snapshots the game's save data into the app's own Documents/save-backups, one folder per snapshot, and restores the
+/* Snapshots the game's save data into the app's own Documents/Save Backups, one folder per snapshot, and restores the
    newest one when the game starts with no save at all.
 
    The iOS app must not show prompts (maintainer, 2026-10-23), so there is no folder picker: the Settings pane's
@@ -16,7 +16,8 @@
 #include "runtime.h"
 #include "save_backup.h"
 
-static NSString *const kBackupFolder = @"save-backups";
+static NSString *const kBackupFolder = @"Save Backups";
+static NSString *const kReadme = @"README.txt";
 static NSString *const kDirectories[] = {@"save", @"game-slot"};
 static const char *const kDirectoryEnvs[] = {"TOTK_PROFILE_DIR", "TOTK_GAME_SLOT_DIR"};   // main.m sets both
 enum { kKeepSnapshots = 3 };
@@ -45,9 +46,34 @@ static BOOL has_files(NSString *folder) {
 static NSArray<NSString *> *snapshots(void) {
     NSString *root = [documents() stringByAppendingPathComponent:kBackupFolder];
     NSMutableArray<NSString *> *names = [NSMutableArray array];
-    for (NSString *name in [files() contentsOfDirectoryAtPath:root error:nil] ?: @[])
-        if (![name hasPrefix:@"."]) [names addObject:name];
+    for (NSString *name in [files() contentsOfDirectoryAtPath:root error:nil] ?: @[]) {
+        BOOL directory = NO;
+        if ([name hasPrefix:@"."]) continue;
+        /* Only snapshots count: the folder also holds README.txt. */
+        if ([files() fileExistsAtPath:[root stringByAppendingPathComponent:name] isDirectory:&directory] && directory)
+            [names addObject:name];
+    }
     return [names sortedArrayUsingSelector:@selector(compare:)];   // timestamp names: lexical order is age order
+}
+
+/* One explanation for the whole folder, next to the snapshots, so it reads clearly in the Files app. */
+static void write_readme(NSString *root) {
+    NSString *path = [root stringByAppendingPathComponent:kReadme];
+    if ([files() fileExistsAtPath:path]) return;
+    NSString *name = [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleDisplayName"] ?: @"This game";
+    NSString *text = [NSString stringWithFormat:
+        @"%@ — save backups / 存档备份\n\n"
+         "Each folder here is one snapshot of the save, taken when the game left the screen.\n"
+         "这里的每个文件夹是一份存档快照，在游戏退到后台时生成。\n\n"
+         "  save/       the game's profile and progress · 存档与进度\n"
+         "  game-slot/  per-slot data · 分槽数据\n\n"
+         "The newest three are kept. When the game starts with no save at all, the newest snapshot is restored automatically.\n"
+         "保留最近 3 份；游戏启动时若没有任何存档，会自动恢复最新的一份。\n\n"
+         "Uninstalling the app deletes this folder too: copy it to iCloud Drive or a computer to keep it across a reinstall.\n"
+         "卸载 App 会一并删除这个文件夹；要跨重装保留，请把它拷到 iCloud 或电脑。\n", name];
+    NSError *error = nil;
+    if (![text writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:&error])
+        fprintf(stderr, "[backup] cannot write %s: %s\n", path.UTF8String, error.localizedDescription.UTF8String);
 }
 
 /* A snapshot is complete or absent: the copy lands in a dot-folder first and is renamed when every folder is in. */
@@ -143,12 +169,13 @@ static BOOL restore_newest(void) {
     dispatch_async(queue, ^{
         NSString *root = [documents() stringByAppendingPathComponent:kBackupFolder];
         NSDateFormatter *stamp = [NSDateFormatter new];
-        stamp.dateFormat = @"yyyyMMdd-HHmmss"; stamp.timeZone = [NSTimeZone timeZoneWithAbbreviation:@"UTC"];
+        stamp.dateFormat = @"yyyy-MM-dd HH-mm-ss"; stamp.timeZone = [NSTimeZone timeZoneWithAbbreviation:@"UTC"];
         NSString *name = [stamp stringFromDate:NSDate.date];
         NSError *error = nil;
         if (![files() createDirectoryAtPath:root withIntermediateDirectories:YES attributes:nil error:&error])
             fprintf(stderr, "[backup] cannot create %s: %s\n", root.UTF8String, error.localizedDescription.UTF8String);
         else if (write_snapshot(root, name)) {
+            write_readme(root);
             fprintf(stderr, "[backup] snapshot %s\n", name.UTF8String);
             prune_snapshots();
         }

@@ -1,6 +1,6 @@
 #import <UIKit/UIKit.h>
 
-/* Snapshots the game's save data into the app's own Documents/save-backups (see save_backup.m). No UI is ever shown:
+/* Snapshots the game's save data into the app's own Documents/Save Backups (see save_backup.m). No UI is ever shown:
    the Settings pane's TOTK_BACKUP switch decides, and a fresh install with an empty save folder restores silently. */
 @interface TOTKSaveBackup : NSObject
 
