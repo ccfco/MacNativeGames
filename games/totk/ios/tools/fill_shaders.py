@@ -7,7 +7,7 @@ pulls those requests, translates them with the Mac's runtime service (build/shad
 cache, compiles device metallibs, and pushes one pack in the startup-seed format to Documents/shader-fill/. The game
 checks and merges the pack on its next start (totk_fill_import) and warms the new variants in the background.
 usage: fill_shaders.py --tree <work tree> --device <id> [--bundle-id <id>] [--requests <dir>] [--with-done] [--no-push]"""
-import argparse, concurrent.futures, hashlib, json, os, re, shutil, subprocess, sys, tempfile, time
+import argparse, concurrent.futures, hashlib, json, os, platform, re, shutil, subprocess, sys, tempfile, time
 from pathlib import Path
 from xcode_dir import developer_dir
 from compile_seed import METAL_FLAGS
@@ -19,6 +19,17 @@ SHADER_LIST = TOTK/'assets/shader_list.tsv'
 VARIANT = re.compile(r'^([0-9a-f]{64})-[0-9a-f]{12}$')
 HEX = re.compile(r'^(?:[0-9a-f]{2})+$')
 MAX_CODE = 16 << 20   # the runtime's own limit on a shader's code area
+
+
+def translator_service(tree):
+    """The native translator: the work tree's build, else the checked-in binary for this Mac."""
+    candidates = [tree/'build/shader-service/totk_xlate',
+                  tree/f'prebuilt/macos-{platform.machine()}/totk_xlate',
+                  TOTK/f'prebuilt/macos-{platform.machine()}/totk_xlate']
+    for path in candidates:
+        if os.access(path, os.X_OK): return path
+    raise RuntimeError('missing shader translator; looked for ' + ', '.join(str(p) for p in candidates))
+
 
 
 def chain():
@@ -35,6 +46,11 @@ def devicectl(env, args, direction, src, dst):
     cmd = ['xcrun', 'devicectl', 'device', 'copy', direction, '--device', args.device, '--domain-type', 'appDataContainer',
            '--domain-identifier', args.bundle_id, '--source', str(src), '--destination', str(dst)]
     return subprocess.run(cmd, capture_output=True, text=True, env=env)
+
+
+def missing_on_device(result):
+    """The source path does not exist yet (no miss has been recorded): not a failed copy."""
+    return 'Failed to retrieve the file node' in (result.stderr or '')
 
 
 def load_requests(folder):
@@ -57,9 +73,11 @@ def translate(rqs, tree, out, ch):
     todo = [rq for rq in rqs if not (out/f"{rq['variant']}_b.metal").is_file()]
     print(f'{len(rqs)} requests, {len(todo)} not yet translated on this Mac')
     if not todo: return set()
-    service = tree/'build/shader-service/totk_xlate'
-    if not os.access(service, os.X_OK): raise RuntimeError(f'missing {service} (make shader-service)')
-    svc = subprocess.Popen([str(service), '--service', '--spirv-cross', str(tree/'build/spirv-cross/spirv-cross'), '--out', str(out),
+    service = translator_service(tree)
+    spirv_cross = tree/'build/spirv-cross/spirv-cross'
+    if not os.access(spirv_cross, os.X_OK): raise RuntimeError(f'missing {spirv_cross}')
+    print(f'translator: {service}')
+    svc = subprocess.Popen([str(service), '--service', '--spirv-cross', str(spirv_cross), '--out', str(out),
                             '--chain', ch], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
     failed = set()
     try:
@@ -134,13 +152,17 @@ def main():
         if not folder:
             folder = work/'requests'
             r = devicectl(env, args, 'from', 'Documents/shader-requests', folder)
-            if r.returncode: print(f"pull was incomplete, using what arrived: {r.stderr.strip().splitlines()[-1:] }")
+            if r.returncode:
+                if missing_on_device(r):
+                    print('no shader requests from the device'); return
+                print(f"pull was incomplete, using what arrived: {r.stderr.strip().splitlines()[-1:]}")
         rqs = load_requests(folder)
         if args.with_done:
             done = folder/'done'
             if not args.requests and not done.is_dir():
                 r = devicectl(env, args, 'from', 'Documents/shader-requests/done', done)
-                if r.returncode: print(f"pull of done requests was incomplete: {r.stderr.strip().splitlines()[-1:] }")
+                if r.returncode and not missing_on_device(r):
+                    print(f"pull of done requests was incomplete: {r.stderr.strip().splitlines()[-1:]}")
             seen = {rq['variant'] for rq in rqs}
             rqs += [rq for rq in load_requests(done) if rq['variant'] not in seen]
         if not rqs: print('no shader requests from the device'); return
