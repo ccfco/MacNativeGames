@@ -10,6 +10,7 @@
 #include "runtime.h"
 #include "dmsh_chain.h"
 #import "touch_pad.h"
+#import "save_backup.h"
 
 int totk_host_main(int argc, char **argv);
 void runtime_ios_attach_layer(CAMetalLayer *layer, UIView *host);
@@ -94,29 +95,33 @@ void runtime_shortcut_help_toggle(void) {}
         [self.view addSubview:say];
         return;
     }
-    if (g_seed_pack) {   // shaders installed as a pack: unpack once, on screen, then start (not on the main thread: a long launch is killed)
-        BOOL zh = [NSLocale.preferredLanguages.firstObject hasPrefix:@"zh"];
-        UILabel *say = [[UILabel alloc] initWithFrame:CGRectInset(self.view.bounds, 40, 40)];
-        say.autoresizingMask = UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
-        say.textColor = UIColor.whiteColor; say.numberOfLines = 0; say.textAlignment = NSTextAlignmentCenter;
-        say.text = zh ? @"正在准备着色器（更新后只做一次）…" : @"Preparing the shaders (once after an update)…";
-        [self.view addSubview:say];
-        NSString *pack = g_seed_pack, *to = g_seed_unpack_to; g_seed_pack = nil;
-        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-            CFAbsoluteTime t0 = CFAbsoluteTimeGetCurrent();
-            NSString *why = seed_unpack(pack, to, ^(uint64_t done, uint64_t total) {
-                dispatch_async(dispatch_get_main_queue(), ^{ say.text = [NSString stringWithFormat:zh ? @"正在准备着色器（更新后只做一次）… %d%%" : @"Preparing the shaders (once after an update)… %d%%", (int)(done * 100 / (total ? total : 1))]; });
+    /* A fresh install with a snapshot restores it before the game thread starts: the game opens its save as it boots,
+       and restoring under it would race that. Nothing is shown either way (the app must not prompt). */
+    [TOTKSaveBackup prepareWithCompletion:^{
+        if (g_seed_pack) {   // shaders installed as a pack: unpack once, on screen, then start (not on the main thread: a long launch is killed)
+            BOOL zh = [NSLocale.preferredLanguages.firstObject hasPrefix:@"zh"];
+            UILabel *say = [[UILabel alloc] initWithFrame:CGRectInset(self.view.bounds, 40, 40)];
+            say.autoresizingMask = UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
+            say.textColor = UIColor.whiteColor; say.numberOfLines = 0; say.textAlignment = NSTextAlignmentCenter;
+            say.text = zh ? @"正在准备着色器（更新后只做一次）…" : @"Preparing the shaders (once after an update)…";
+            [self.view addSubview:say];
+            NSString *pack = g_seed_pack, *to = g_seed_unpack_to; g_seed_pack = nil;
+            dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                CFAbsoluteTime t0 = CFAbsoluteTimeGetCurrent();
+                NSString *why = seed_unpack(pack, to, ^(uint64_t done, uint64_t total) {
+                    dispatch_async(dispatch_get_main_queue(), ^{ say.text = [NSString stringWithFormat:zh ? @"正在准备着色器（更新后只做一次）… %d%%" : @"Preparing the shaders (once after an update)… %d%%", (int)(done * 100 / (total ? total : 1))]; });
+                });
+                fprintf(stderr, "[totk] shader pack: %s in %.1f s\n", why ? why.UTF8String : "ready", CFAbsoluteTimeGetCurrent() - t0);
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    if (why) { say.text = zh ? [NSString stringWithFormat:@"着色器准备失败（%@）。请在 Mac 上用 ios/tools/install_device.py 重新安装。", why]
+                                             : [NSString stringWithFormat:@"Could not prepare the shaders (%@). Install again from the Mac with ios/tools/install_device.py.", why]; return; }
+                    [say removeFromSuperview]; [self startGame];
+                });
             });
-            fprintf(stderr, "[totk] shader pack: %s in %.1f s\n", why ? why.UTF8String : "ready", CFAbsoluteTimeGetCurrent() - t0);
-            dispatch_async(dispatch_get_main_queue(), ^{
-                if (why) { say.text = zh ? [NSString stringWithFormat:@"着色器准备失败（%@）。请在 Mac 上用 ios/tools/install_device.py 重新安装。", why]
-                                         : [NSString stringWithFormat:@"Could not prepare the shaders (%@). Install again from the Mac with ios/tools/install_device.py.", why]; return; }
-                [say removeFromSuperview]; [self startGame];
-            });
-        });
-        return;
-    }
-    [self startGame];
+            return;
+        }
+        [self startGame];
+    }];
 }
 - (void)startGame {
     /* Playback category (PR #97): plays with the ring / silent switch off and routes to the speaker. Without an active
@@ -295,6 +300,12 @@ static void audio_observe(void) {
     chdir(docs.fileSystemRepresentation);
     host_argv[0] = strdup("TOTK"); host_argv[1] = strdup(res.fileSystemRepresentation); host_argv[2] = strdup("boot");
     return YES;   // the window is made when the window scene connects (TOTKSceneDelegate)
+}
+/* The last moment the save is consistent and the app is still running; the copy runs off the main thread with a
+   background task so a suspension cannot cut it short. */
+- (void)applicationDidEnterBackground:(UIApplication *)application {
+    (void)application;
+    [TOTKSaveBackup snapshot];
 }
 @end
 
