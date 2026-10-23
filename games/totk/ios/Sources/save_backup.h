@@ -1,13 +1,12 @@
 #import <UIKit/UIKit.h>
 
-/* Snapshots the game's save data into the app's own Documents/Save Backups (see save_backup.m). No UI is ever shown:
-   the Settings pane's TOTK_BACKUP switch decides, and a fresh install with an empty save folder restores silently. */
+/* iCloud Drive / Files backup of Documents/save and Documents/game-slot (see save_backup.m). Off unless the Settings
+   switch sets TOTK_BACKUP=1; the folder is then picked once and remembered. */
 @interface TOTKSaveBackup : NSObject
 
 + (BOOL)enabled;
-/* Restores the newest snapshot when the game has no save yet, then calls ready once; always before the game thread. */
-+ (void)prepareWithCompletion:(void (^)(void))ready;
-/* Copies the current save into a new snapshot, prunes the old ones; asynchronous, safe on app background. */
-+ (void)snapshot;
+/* Resolves (or asks for) the backup folder, restores a fresh install, then calls ready once — and starts the game. */
++ (void)prepareFrom:(UIViewController *)host completion:(void (^)(void))ready;
++ (void)sync;
 
 @end

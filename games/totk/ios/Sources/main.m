@@ -95,9 +95,9 @@ void runtime_shortcut_help_toggle(void) {}
         [self.view addSubview:say];
         return;
     }
-    /* A fresh install with a snapshot restores it before the game thread starts: the game opens its save as it boots,
-       and restoring under it would race that. Nothing is shown either way (the app must not prompt). */
-    [TOTKSaveBackup prepareWithCompletion:^{
+    /* Backup is off by default; once the player turns it on, the folder is picked here once (before the game thread
+       starts, so a restore cannot race the game's own save loading) and remembered as a security-scoped bookmark. */
+    [TOTKSaveBackup prepareFrom:self completion:^{
         if (g_seed_pack) {   // shaders installed as a pack: unpack once, on screen, then start (not on the main thread: a long launch is killed)
             BOOL zh = [NSLocale.preferredLanguages.firstObject hasPrefix:@"zh"];
             UILabel *say = [[UILabel alloc] initWithFrame:CGRectInset(self.view.bounds, 40, 40)];
@@ -300,12 +300,6 @@ static void audio_observe(void) {
     chdir(docs.fileSystemRepresentation);
     host_argv[0] = strdup("TOTK"); host_argv[1] = strdup(res.fileSystemRepresentation); host_argv[2] = strdup("boot");
     return YES;   // the window is made when the window scene connects (TOTKSceneDelegate)
-}
-/* The last moment the save is consistent and the app is still running; the copy runs off the main thread with a
-   background task so a suspension cannot cut it short. */
-- (void)applicationDidEnterBackground:(UIApplication *)application {
-    (void)application;
-    [TOTKSaveBackup snapshot];
 }
 @end
 
