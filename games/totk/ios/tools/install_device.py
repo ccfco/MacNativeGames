@@ -13,7 +13,7 @@ one file that size); a later install skips it while the device holds the same im
 Xcode needs your Apple ID (Xcode > Settings > Accounts). The provisioning profile comes from a throwaway Xcode project
 built with the same bundle identifier and entitlements (-allowProvisioningUpdates registers the device and the App ID).
 """
-import argparse, hashlib, json, os, plistlib, re, shutil, subprocess, sys, tempfile, zipfile
+import argparse, time, hashlib, json, os, plistlib, re, shutil, subprocess, sys, tempfile, zipfile
 from datetime import timezone
 from pathlib import Path
 
@@ -87,11 +87,15 @@ def identity_of(signed_app):
 
 PART = 1 << 30
 def device_files(dev, bundle_id, sub):
-    """{name: size} of the app's Documents/<sub> on the device, {} when there is none."""
+    """{name: size} of the app's Documents/<sub> on the device, {} when there is none. A device that cannot be reached is
+    an error, not "nothing there": taken as empty, an install began copying the 16 GiB again and marked the copy on the
+    device stale before failing (2026-10-23, the phone had locked)."""
     with tempfile.NamedTemporaryFile(suffix='.json') as f:
         r = subprocess.run(['xcrun','devicectl','device','info','files','--device',dev,'--domain-type','appDataContainer',
                             '--domain-identifier',bundle_id,'--subdirectory',sub,'--json-output',f.name], capture_output=True)
-        if r.returncode: return {}
+        if r.returncode:
+            if sub != 'Documents' and device_files(dev, bundle_id, 'Documents') is not None: return {}   # reachable: the folder is not there yet
+            sys.exit(f'cannot read Documents/{sub} on the device (is it connected by cable and unlocked?): {r.stderr.decode(errors="replace").strip()[-300:]}')
         files = json.load(open(f.name)).get('result', {}).get('files', [])
     return {Path(x.get('relativePath', x.get('name', ''))).name: x.get('metadata', {}).get('size', 0) for x in files}   # devicectl's JSON
 
@@ -108,6 +112,14 @@ def push_game_data(dev, bundle_id, image):
                                 '--domain-identifier',bundle_id,'--source','Documents/GameData/romfs.sha256','--destination',got], capture_output=True)
             if r.returncode == 0 and got.read_text().strip() == sha:
                 print('game data: the device already has this image'); return
+    # every part there at its full size but the marker not (an install stopped between writing "stale" and the first part):
+    # the parts are this image, only the marker is written again
+    if all(have.get(f'romfs.bin.{i:03d}') == min(PART, size - i * PART) for i in range(parts)) and have.get('romfs.sha256') != 64 + 1:
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d)/'romfs.sha256').write_text(sha + '\n')
+            run(['xcrun','devicectl','device','copy','to','--device',dev,'--domain-type','appDataContainer','--domain-identifier',
+                 bundle_id,'--source',Path(d)/'romfs.sha256','--destination','Documents/GameData/romfs.sha256'], capture_output=True)
+        print('game data: every part is on the device; only its marker was written again'); return
     print(f'game data: copying {size / 2**30:.1f} GiB in {parts} parts (once; later installs keep it)')
     with tempfile.TemporaryDirectory() as d, open(image, 'rb') as src:
         def copy(local, name):
@@ -119,6 +131,56 @@ def push_game_data(dev, bundle_id, image):
             part.write_bytes(src.read(PART)); copy(part, part.name); part.unlink()
             print(f'  part {i + 1}/{parts}', flush=True)
         (Path(d)/'romfs.sha256').write_text(sha + '\n'); copy(Path(d)/'romfs.sha256', 'romfs.sha256')
+
+def write_pack(seed, names, d, folder, size, done):
+    """The files `names` of `seed` as one stream (ios/Sources/main.m seed_unpack: "TOTKPACK1", then per file a u16 name
+    length, the name, a u64 size and the bytes, a zero name length last) in parts of `size` bytes, d/<folder>.pack.NNN;
+    done(path) is called with each part once it is complete."""
+    part, out, n = 0, None, 0
+    def roll():
+        nonlocal part, out, n
+        if out:
+            out.close(); done(d/f'{folder}.pack.{part:03d}'); part += 1
+        out = open(d/f'{folder}.pack.{part:03d}', 'wb'); n = 0
+    def write(b):
+        nonlocal n
+        while b:
+            if n >= size: roll()
+            k = min(len(b), size - n); out.write(b[:k]); n += k; b = b[k:]
+    roll(); write(b'TOTKPACK1')
+    for name in names:
+        raw = name.encode()
+        write(len(raw).to_bytes(2, 'little') + raw + (seed/name).stat().st_size.to_bytes(8, 'little'))
+        write((seed/name).read_bytes())
+    write((0).to_bytes(2, 'little'))
+    out.close(); done(d/f'{folder}.pack.{part:03d}')
+
+def push_seed(dev, bundle_id, seed):
+    """The startup shaders of an app built with --ios-game-data documents (<app>-shader-seed beside it) into Documents/
+    GameData as one stream in 1 GiB parts (<folder>.pack.000, ...), then shader-seed.txt naming the folder; the app unpacks
+    them on its next start (ios/Sources/main.m seed_unpack). devicectl copying the folder itself stopped after ~25,000 of
+    its 128,000 files over the cable (2026-10-23). Skipped while the device has this content (fingerprint.txt)."""
+    fp = (seed/'fingerprint.txt').read_text().strip()
+    with tempfile.TemporaryDirectory(dir=seed.parent) as d:   # beside the seed: 1 GiB parts, not on the system disk
+        got = Path(d)/'shader-seed.txt'
+        r = subprocess.run(['xcrun','devicectl','device','copy','from','--device',dev,'--domain-type','appDataContainer',
+                            '--domain-identifier',bundle_id,'--source','Documents/GameData/shader-seed.txt','--destination',got], capture_output=True)
+        lines = got.read_text().split('\n') if r.returncode == 0 and got.is_file() else []
+        have = device_files(dev, bundle_id, 'Documents/GameData')
+        if len(lines) >= 2 and lines[1].strip() == fp and (lines[0] in have or f'{lines[0]}.pack.000' in have):
+            print('shaders: the device already has these'); return
+        folder = f'shader-seed-{fp[:12]}-{int(time.time())}'
+        names = sorted(p.name for p in seed.iterdir() if p.is_file())
+        total = sum((seed/n).stat().st_size for n in names)
+        print(f'shaders: copying {len(names)} files, {total / 2**30:.1f} GiB, as one pack (once per shader list; later installs keep them)')
+        def copy(local, name):
+            run(['xcrun','devicectl','device','copy','to','--device',dev,'--domain-type','appDataContainer','--domain-identifier',
+                 bundle_id,'--source',local,'--destination',f'Documents/GameData/{name}'], capture_output=True)
+        got.write_text('stale\n'); copy(got, 'shader-seed.txt')   # until every part is there
+        def push(local):
+            copy(local, local.name); local.unlink(); print(f'  {local.name}', flush=True)
+        write_pack(seed, names, Path(d), folder, PART, push)
+        got.write_text(f'{folder}\n{fp}\n'); copy(got, 'shader-seed.txt')
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -147,13 +209,8 @@ def main():
     # Unpack once per IPA; later runs only re-sign. 16 GiB of game data is signed in place.
     work = a.ipa.with_suffix('.signed'); stamp = work/'.ipa-mtime'
     app = work/'Payload/TOTK.app'
-    if a.ipa.is_dir():   # an unsigned .app (build_app.py -o X.app): cloned, nothing to unpack
-        print(f'cloning {a.ipa.name}')
-        shutil.rmtree(work, ignore_errors=True); app.parent.mkdir(parents=True)
-        import ctypes   # one APFS clone of the whole folder (~100,000 files), as build_app.py copy_tree
-        libc = ctypes.CDLL(None); libc.clonefile.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint32]
-        if libc.clonefile(os.fsencode(a.ipa), os.fsencode(app), 0) and subprocess.run(['/bin/cp', '-cR', a.ipa, app]).returncode:
-            sys.exit(f'cannot copy {a.ipa}')
+    if a.ipa.is_dir():   # an unsigned .app (build_app.py -o X.app): signed where it is, a build's own output (no copy)
+        app = a.ipa.resolve(); work.mkdir(exist_ok=True)
     elif not stamp.is_file() or stamp.read_text() != str(a.ipa.stat().st_mtime_ns):
         print(f'unpacking {a.ipa.name}')
         shutil.rmtree(work, ignore_errors=True); work.mkdir()
@@ -171,6 +228,9 @@ def main():
     print('installing (a few minutes over the cable)')
     run(['xcrun','devicectl','device','install','app','--device',dev['identifier'],app])
     if a.game_data: push_game_data(dev['identifier'], bundle_id, a.game_data)
+    seed = a.ipa.with_name(a.ipa.stem + '-shader-seed')   # build_ipa.py --image-outside
+    if a.ipa.is_dir() and not (app/'GameData/shader-seed').is_dir() and (seed/'fingerprint.txt').is_file():
+        push_seed(dev['identifier'], bundle_id, seed)
     print('installed. First time on this device: Settings > General > VPN & Device Management > trust your Apple ID.')
 
 if __name__ == '__main__': main()

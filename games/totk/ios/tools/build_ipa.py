@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Build an unsigned, sideloadable iPhone/iPad IPA from a prepared TOTK work tree."""
-import argparse, json, os, shutil, subprocess, sys
+import argparse, json, os, shutil, subprocess, sys, time
 from pathlib import Path
 from compile_seed import METAL_FLAGS
 from xcode_dir import developer_dir
@@ -24,6 +24,13 @@ def clone_folder(src,dst):
     libc=ctypes.CDLL(None);libc.clonefile.argtypes=[ctypes.c_char_p,ctypes.c_char_p,ctypes.c_uint32]
     dst.parent.mkdir(parents=True,exist_ok=True)
     return libc.clonefile(os.fsencode(src),os.fsencode(dst),0)==0
+
+def discard(path):
+    """Out of the way at once (a rename), deleted in the background: tens of thousands of files take minutes to delete on
+    an external disk, and the build does not need to wait for it."""
+    if not path.exists(): return
+    old=path.with_name(f'.{path.name}.old-{os.getpid()}-{time.time_ns()}')
+    os.rename(path,old); subprocess.Popen(['/bin/rm','-rf',str(old)],start_new_session=True)
 
 def copy_tree(src,dst):
     src=Path(src);dst=Path(dst)
@@ -127,7 +134,13 @@ def main():
     # Carry the increased-memory-limit entitlement in the executable's ad-hoc signature so re-signing tools keep it;
     # the game's 3.2 GiB pool exceeds the default iOS footprint limit.
     run(['codesign','--force','--sign','-','--entitlements',ios/'Sources/TOTK.entitlements',app/'TOTK'],ios,logs/'ios-entitlements.log',env)
-    res=app/'GameData';res.mkdir(exist_ok=True)
+    # The game data goes into a copy of Xcode's product, never into the product itself: it then stays small (its own
+    # files only), and each build copies it once instead of three times (product -> Payload -> output, ~27,000 seed
+    # files each, 5 of the 7 minutes of a build, 2026-10-23). Products of earlier builds still carry GameData.
+    if (app/'GameData').exists(): discard(app/'GameData')
+    dest=out if out.suffix=='.app' else tree/'build/ios-payload/Payload/TOTK.app'
+    discard(dest); copy_tree(app,dest)
+    res=dest/'GameData';res.mkdir(exist_ok=True)
     romfs=tree/f'extracted/{a.version}/romfs'
     copy_tree(romfs,res/'romfs')
     if a.image_outside:   # the index stays (it changes with the build); the 17 GB image is in Documents/GameData (main.m)
@@ -135,24 +148,32 @@ def main():
     for src,dst in [(tree/f'extracted/{a.version}/romfs-patches',res/'romfs-patches'),
                     (tree/f'extracted/{a.version}/romfs-patches-out',res/'romfs-patches-out'),
                     (tree/'extracted/firmware/shared-fonts',res/'shared-fonts')]: copy_tree(src,dst)
-    copy_tree(seed,res/'shader-seed')
     # The first frame waits only for the title screen's shaders (pso_title.tsv); the runtime looks for the list next to
     # DM_NVN_SHMAP, which is in shader-seed on iOS. Without it the first frame waits for the whole warm-up.
     # Exported from the one shared shader list (games/totk/assets/shader_list.tsv, docs/shader-list.md).
     # The list's other warm rows (its render pipelines) go in as pso_list.tsv: shader-seed/pso_manifest.tsv is the seed's own
     # list there, and the runtime reads both (nvn_mtl.m warm_start). Before 2026-10-22 they stayed in the build logs.
-    run([sys.executable,tree/'scripts/shader_list.py','export',tree/'assets/shader_list.tsv',res/'shader-seed/pso_list.tsv',
-         res/'shader-seed/pso_title.tsv'],tree,logs/'shader-list.log',env)
+    lists=tree/'build/ios-seed-lists';shutil.rmtree(lists,ignore_errors=True);lists.mkdir(parents=True)
+    run([sys.executable,tree/'scripts/shader_list.py','export',tree/'assets/shader_list.tsv',lists/'pso_list.tsv',
+         lists/'pso_title.tsv'],tree,logs/'shader-list.log',env)
     aliases=seed_src.with_name(seed_src.name+'.aliases.tsv')   # listed variants the seed carries under another name
     if aliases.is_file():
-        run([sys.executable,tree/'scripts/shader_list.py','rename',aliases,res/'shader-seed/pso_title.tsv',
-             res/'shader-seed/pso_list.tsv'],tree,logs/'shader-list-rename.log',env)
-    # Keep the player's first install self-contained; the app stores saves and writable shader cache in Documents.
-    payload=tree/'build/ios-payload';shutil.rmtree(payload,ignore_errors=True);(payload/'Payload').mkdir(parents=True)
-    copy_tree(app,payload/'Payload/TOTK.app')
-    if out.suffix=='.app':   # the unsigned app as a folder (an APFS clone), for install_device.py: no 100,000-file zip
-        shutil.rmtree(out,ignore_errors=True); copy_tree(payload/'Payload/TOTK.app',out)
+        run([sys.executable,tree/'scripts/shader_list.py','rename',aliases,lists/'pso_title.tsv',
+             lists/'pso_list.tsv'],tree,logs/'shader-list-rename.log',env)
+    # What the device reads: the seed and the two lists. With --image-outside it goes beside the app (<out>-shader-seed),
+    # for install_device.py to put into Documents/GameData once per content (main.m); unchanged content is not copied again.
+    fingerprint=hashlib.sha256(b''.join((d/n).read_bytes() for d,n in [(seed,'seed-manifest.json'),(seed,'shader_map.tsv'),
+                                        (lists,'pso_list.tsv'),(lists,'pso_title.tsv')])).hexdigest()
+    seed_out=out.with_name(out.stem+'-shader-seed') if a.image_outside else res/'shader-seed'
+    stamp=seed_out/'fingerprint.txt'
+    if not (a.image_outside and stamp.is_file() and stamp.read_text().strip()==fingerprint):
+        discard(seed_out); copy_tree(seed,seed_out)
+        for n in ('pso_list.tsv','pso_title.tsv'): clone(lists/n,seed_out/n)
+        stamp.write_text(fingerprint+'\n')
+    if a.image_outside: print(f'shader seed: {seed_out} (install_device.py puts it into Documents once per content)')
+    if out.suffix=='.app':   # the unsigned app as a folder, for install_device.py: no 100,000-file zip
         print(f'app ready: {out}; unsigned, install it with ios/tools/install_device.py'); return
+    payload=tree/'build/ios-payload'
     out.parent.mkdir(parents=True,exist_ok=True);out.unlink(missing_ok=True)
     run(['zip','-qry','-0',out,'Payload'],payload,logs/'ipa-zip.log',env)
     print(f'IPA ready: {out} ({out.stat().st_size/2**30:.1f} GiB); unsigned, sideload with your signing tool')

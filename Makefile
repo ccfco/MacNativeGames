@@ -6,9 +6,9 @@
 # The Python tests need the packages in games/totk/requirements.txt; install them once
 # (the CI does the same with pip) and this stays offline.
 
-# CI pins Python 3.14 (compression.zstd), and tests/test_mod_manifest.py skips its zstd cases without it: a gate on an
-# older interpreter can pass while CI fails, so the default is the version CI runs. Override with PYTHON=... .
-PYTHON ?= python3.14
+# The tests import compression.zstd (games/totk/scripts/make_romfs_patches.py), which is standard only from Python 3.14;
+# the README and the CI use that version, so prefer it when it is installed. PYTHON still overrides this.
+PYTHON ?= $(shell command -v python3.14 >/dev/null 2>&1 && echo python3.14 || echo python3)
 CC ?= cc
 
 .PHONY: check

@@ -10,14 +10,12 @@
 #include <math.h>
 #include "game_patches.h"
 #include "game_version.h"
-#ifdef GAME_BOTW190
 #include "aspect_math.h"   /* key 4: TOTK_ASPECT parsing */
-#endif
 uint32_t runtime_thread_current_handle(void);
-#ifdef GAME_BOTW190
 static void botw_aspect_install(Module *m);   /* key 4, end of the file */
+static int patch_output_res(Module *m);   /* native output size, after runtime_output_res */
+static void botw_output_tick(void);       /* the size static follows the canvas after the start */
 static void botw_aspect_apply(void);
-#endif
 
 /* Real-time frame step (TOTK_REALTIME=0: as shipped). ksys::VFR (singleton pointer main+0x2d1e170, built at main+0x183eb98)
    keeps one frame ratio at +0x3c: the frame's length in 30 fps frames. Every per-core step the game reads derives from it:
@@ -149,9 +147,8 @@ static void pad_tick_advance(void) {
     }
 }
 void runtime_frame_step_update(uint64_t now_ns) {
-#ifdef GAME_BOTW190
     botw_aspect_apply();   /* key 4 */
-#endif
+    botw_output_tick();    /* key 3 */
     if (!frame_step_data || !now_ns) return;
     frame_step_measure(now_ns);
     if (pad_tick) pad_tick_advance();
@@ -490,10 +487,8 @@ static void patch_render_1080(Module *m) {
 void runtime_game_patches(Module *m) {
     fprintf(stderr, "[botw] %s game-code patches\n", TOTK_GAME_VERSION);
     runtime_survey_init(m);   /* TOTK_SURVEY=1: survey pos / move (world_survey.c) */
-    patch_render_1080(m);
-#ifdef GAME_BOTW190
+    if (!patch_output_res(m)) patch_render_1080(m);
     botw_aspect_install(m);
-#endif
     if (realtime_enabled()) patch_realtime(m);
     else fprintf(stderr, "[botw] real-time frame step off (TOTK_REALTIME=0): the game advances by its present interval\n");
     { const char *a = getenv("TOTK_EXCL_ACQUIRE");
@@ -611,10 +606,133 @@ int botw_jq_hook(void *context) {   /* SIGTRAP from loader.c crash(): 1 = it was
 }
 #undef U32
 #undef U64
-int runtime_output_res(unsigned *w, unsigned *h) { (void)w; (void)h; return 0; }
 int runtime_render_res(unsigned *w, unsigned *h) { (void)w; (void)h; return 0; }   /* no scene size above 1600x900 for the heaps (romfs.c) */
+#ifdef GAME_BOTW160
+/* Output size, 1.6.0: key 3 cycles off -> MetalFX 2K -> native 2K -> off, as on Tears of the Kingdom 1.4.3 (user
+   2026-10-23). The game takes its TV size from two places (both found in the code): a function-local static {1920, 1080}
+   at main+0x2cceb10 that six guarded initialisers write (the framework makes the swapchain from it once at the start; the
+   system task's TV size, the dungeon map and the noise gauge read it), and the docked branch of the display-mode function
+   (main+0x1821670..0x18216ac), which writes the screen and render widths (+0x1290: 1920.0 and the shipped 1600.0), the
+   system task's TV size (+0x4c0, which Renderer::calc pushes to the TV display every frame) and the window crop.
+   TOTK_OUTPUT_RES unset or auto (the default): the initialisers make a 2560x1440 swapchain, the docked branch takes its
+   sizes from the data page after the module (+16 {screen, render width} floats, +24 {width, height}), starting at
+   1920x1080 drawn in the swapchain's top-left (the window crop), and key 3 rewrites them and asks the display-mode
+   function to apply the current mode again (+0x123d = +0x123e of *(main+0x2cceaf0), as the game itself does at
+   main+0x1821624; it takes the request under its lock at main+0x1821644). The static follows the canvas after the start.
+   <w>x<h>: that size from the start, fixed. 0: the shipped 1920x1080 swapchain, no switching (patch_render_1080 then
+   renders the scene at 1080p). Heaps are fixed in the code (no HeapDef): render targets 115 -> 320 MiB, the graphics
+   system (the swapchain) 48 -> 64 MiB, SetMemoryHeapSize and the root block +224 MiB, the host's application pool the
+   same (runtime_output_res_extra_bytes, services.c); native 2K was played without a heap failure (user 2026-10-23). */
+enum { OUT_OFF, OUT_AUTO, OUT_FIXED };
+static int g_out_mode = -1;
+static unsigned g_out_w, g_out_h;            /* the largest canvas: the swapchain and the heaps are made for it */
+static _Atomic uint64_t g_out_cur;           /* the canvas now, w | h << 32 */
+static _Atomic uint64_t *g_out_page;         /* the data page + 16: [0] {screen, render width} floats, [1] {width, height} */
+static uint8_t *g_out_main;
+static void output_parse(void) {
+    if (g_out_mode >= 0) return;
+    const char *e = getenv("TOTK_OUTPUT_RES"); unsigned a, b; char tail;
+    if (e && !strcmp(e, "0")) { g_out_mode = OUT_OFF; return; }
+    if (!e || !*e || !strcmp(e, "auto")) { g_out_mode = OUT_AUTO; g_out_w = 2560; g_out_h = 1440; return; }
+    if (sscanf(e, "%ux%u%c", &a, &b, &tail) != 2 || a < 1280 || b < 720 || a > 7680 || b > 4320)
+        runtime_fail("TOTK_OUTPUT_RES must be auto, 0 or <width>x<height> (1280x720 .. 7680x4320)");
+    g_out_mode = OUT_FIXED; g_out_w = a; g_out_h = b;
+}
+int runtime_output_res(unsigned *w, unsigned *h) {
+    output_parse();
+    if (g_out_mode == OUT_OFF) return 0;
+    if (w) *w = g_out_w;
+    if (h) *h = g_out_h;
+    return 1;
+}
+uint64_t runtime_output_size_current(void) { uint64_t c = atomic_load(&g_out_cur); return c ? c : 1920ull | (1080ull << 32); }
+#define OUTPUT_EXTRA (224ull << 20)
+uint64_t runtime_output_res_extra_bytes(void) { return runtime_output_res(NULL, NULL) ? OUTPUT_EXTRA : 0; }
+static uint32_t movz_x(unsigned rd, unsigned imm16, unsigned hw) { return 0xd2800000u | (hw << 21) | (imm16 << 5) | rd; }
+static uint32_t movk_x(unsigned rd, unsigned imm16, unsigned hw) { return 0xf2800000u | (hw << 21) | (imm16 << 5) | rd; }
+static uint64_t output_floats(unsigned screen, unsigned render) {
+    float a = (float)screen, b = (float)render; uint32_t x, y; memcpy(&x, &a, 4); memcpy(&y, &b, 4);
+    return x | ((uint64_t)y << 32);
+}
+static void output_page(unsigned w, unsigned h) {   /* what the docked branch writes from its next run on */
+    const char *e = getenv("TOTK_RENDER_RES");
+    unsigned render = w == 1920 && h == 1080 && e && !strcmp(e, "900") ? 1600 : w;   /* the shipped 1600x900 scene at 1080p only */
+    atomic_store(&g_out_page[0], output_floats(w, render));
+    atomic_store(&g_out_page[1], w | ((uint64_t)h << 32));
+    atomic_store(&g_out_cur, w | ((uint64_t)h << 32));
+}
+static void output_static(void) { uint64_t c = atomic_load(&g_out_cur); memcpy(g_out_main + 0x2cceb10, &c, 8); }
+static int output_reapply(void) {
+    uint64_t g; memcpy(&g, g_out_main + 0x2cceaf0, 8);
+    if (!g) return 0;
+    volatile uint8_t *gfx = (volatile uint8_t *)(uintptr_t)g;
+    uint8_t mode = gfx[0x123e];
+    if (mode != 0 && mode != 2) return 0;   /* docked only: handheld and VR keep their own sizes */
+    gfx[0x123d] = mode;
+    return 1;
+}
+static void output_switch(unsigned w, unsigned h) {
+    output_page(w, h); output_static();
+    int ok = output_reapply();
+    fprintf(stderr, "[botw] output %ux%u%s\n", w, h, ok ? " (the display mode applies it at the next frame)" : ": the game is not in a docked mode now; it applies when it is");
+}
+/* At each present: once the framework has made the swapchain from the static, the static follows the canvas (the dungeon
+   map and the noise gauge scale by it every call). */
+static void botw_output_tick(void) {
+    static int done;
+    if (done || g_out_mode != OUT_AUTO || !g_out_page) return;
+    done = 1; output_static();
+}
+static int patch_output_res(Module *m) {
+    unsigned w, h; if (!runtime_output_res(&w, &h)) return 0;
+    if (w > 0xffff || h > 0xffff) runtime_fail("TOTK_OUTPUT_RES too large");
+    static const uint32_t size_init[] = {0xe563dc, 0xe56410, 0x113fb48, 0x1140208, 0x1186ce0, 0x1805028};
+    static const struct { uint32_t off, original; } check[] = {
+        {0x1821670, 0xd2a89e08}, {0x1821674, 0xf2e89908}, {0x1821678, 0xf9094b88}, {0x182167c, 0xf000a508}, {0x1821680, 0xf9408108},
+        {0x1821684, 0xd280f009}, {0x1821688, 0xf2c08709}, {0x182168c, 0xf9026109}, {0x18216ac, 0xf8054109},
+        {0x1804c44, 0x52a0e608}, {0xe550a0, 0x320807e0}, {0xe536dc, 0x52b86000}, {0xe53fa0, 0x52b82015},
+    };
+    uint32_t word;
+    for (size_t i = 0; i < sizeof size_init / sizeof *size_init; i++) {
+        memcpy(&word, m->base + size_init[i], 4); uint32_t k; memcpy(&k, m->base + size_init[i] + 12, 4);
+        if (word != 0xd280f009u || k != 0xf2c08709u) { fprintf(stderr, "[botw] output size main+%#x: %08x / %08x\n", size_init[i], word, k); runtime_fail("the output size requires the 1.6.0 size initialisers"); }
+    }
+    for (size_t i = 0; i < sizeof check / sizeof *check; i++) {
+        memcpy(&word, m->base + check[i].off, 4);
+        if (word != check[i].original) { fprintf(stderr, "[botw] output size main+%#x: found %08x expected %08x\n", check[i].off, word, check[i].original); runtime_fail("the output size requires the 1.6.0 display-mode and heap instructions"); }
+    }
+    uint64_t data_off = (m->file_size + 0x3fff) & ~0x3fffULL;
+    if (data_off + 0x4000 != m->size) runtime_fail("the output size: no data page after the main module");
+    const uint64_t page = (uintptr_t)m->base + data_off;
+    g_out_main = m->base; g_out_page = (_Atomic uint64_t *)(void *)(page + 16);
+    output_page(g_out_mode == OUT_AUTO ? 1920 : w, g_out_mode == OUT_AUTO ? 1080 : h);
+    uint32_t mw = movz_x(9, w, 0), mh = movk_x(9, h, 2);   /* the swapchain at the largest size */
+    for (size_t i = 0; i < sizeof size_init / sizeof *size_init; i++) { memcpy(m->base + size_init[i], &mw, 4); memcpy(m->base + size_init[i] + 12, &mh, 4); }
+    const uint32_t branch[4] = {
+        adrp_reg(9, (uintptr_t)m->base + 0x1821670, page),   /* adrp x9, page */
+        0xf9400928u,                                         /* ldr x8, [x9, #16]: {screen, render width} */
+        0xf9400d29u,                                         /* ldr x9, [x9, #24]: {width, height} (at 0x1821684) */
+        0xd503201fu,                                         /* nop */
+    };
+    memcpy(m->base + 0x1821670, &branch[0], 4); memcpy(m->base + 0x1821674, &branch[1], 4);
+    memcpy(m->base + 0x1821684, &branch[2], 4); memcpy(m->base + 0x1821688, &branch[3], 4);
+    const uint32_t heap_render = 0x52a28008u;   /* mov w8, #0x14000000: 320 MiB */
+    const uint32_t heap_gfx = 0x320603e0u;      /* mov w0, #0x4000000: 64 MiB */
+    const uint32_t heap_size = 0x52ba2000u;     /* mov w0, #0xd1000000: SetMemoryHeapSize +224 MiB */
+    const uint32_t heap_root = 0x52b9e015u;     /* mov w21, #0xcf000000: the root block +224 MiB */
+    memcpy(m->base + 0x1804c44, &heap_render, 4); memcpy(m->base + 0xe550a0, &heap_gfx, 4);
+    memcpy(m->base + 0xe536dc, &heap_size, 4); memcpy(m->base + 0xe53fa0, &heap_root, 4);
+    fprintf(stderr, "[botw] output: a %ux%u swapchain, starting at %s; heaps: render 320 MiB, graphics 64 MiB, +224 MiB (23 instructions verified)%s\n",
+            w, h, g_out_mode == OUT_AUTO ? "1920x1080" : "that size", g_out_mode == OUT_AUTO ? "; key 3: off -> MetalFX 2K -> native 2K" : "");
+    return 1;
+}
+#else
+int runtime_output_res(unsigned *w, unsigned *h) { (void)w; (void)h; return 0; }
 uint64_t runtime_output_size_current(void) { return 1920ull | (1080ull << 32); }   /* the canvas this game draws (frontend.m's shortcut text); no output-size patch yet */
 uint64_t runtime_output_res_extra_bytes(void) { return 0; }
+static int patch_output_res(Module *m) { (void)m; return 0; }
+static void botw_output_tick(void) {}
+#endif
 /* Pre-rendered movies (the memories, the intro): the movie player advances one movie frame per game frame, so above
    30 fps they ran fast, out of step with their sound, and a cutscene could wait for ever (2026-10-20). main+0x2cbef40
    holds the movie object while one plays (stored at main+0x1600e74 when it is made, cleared at main+0x1a4d6f0 after it
@@ -639,81 +757,149 @@ int runtime_game_fps_limit(void) {
     return movie ? 30 : 0;
 }
 int runtime_output_res_toggle(void) { return 0; }
-/* Key 3 (runtime/input.c): MetalFX 2K on / off. On: MetalFX replaces the game's own upscale of the 1600x900 picture into
-   the 1080p canvas (nvn_mtl.m mfxup_dock, BOTW_MFXUP_DOCK_KEY) and upscales the canvas into a window or full screen bigger
-   than 1080p at the present (the output stage). This game has no native-2K mode yet: its canvas size is not patched. */
+/* Key 3 (runtime/input.c). MetalFX 2K: MetalFX replaces the game's own upscale of the scene into the 1080p canvas
+   (nvn_mtl.m mfxup_dock, BOTW_MFXUP_DOCK_KEY) and upscales the canvas into a window or full screen bigger than 1080p at
+   the present (the output stage). 1.6.0 with a 2K-capable start (TOTK_OUTPUT_RES auto, the default): off -> MetalFX 2K ->
+   native 2K (the canvas and the scene at 2560x1440, output_switch) -> off; otherwise MetalFX 2K on / off. */
 int runtime_output_mode_cycle(void) {
     extern int mfxup_enabled(void);
     extern void dm_gfx_set_flag(const char *name, int value);
+#ifdef GAME_BOTW160
+    if (g_out_mode == OUT_AUTO && g_out_page) {
+        unsigned cw = (unsigned)(atomic_load(&g_out_cur) & 0xffffffffu);
+        if (cw > 1920) { output_switch(1920, 1080); fprintf(stderr, "[botw] key 3: 关闭 2K\n"); return 1; }
+        if (mfxup_enabled()) {
+            dm_gfx_set_flag("mfx_output", 0); dm_gfx_set_flag("mfx_upscale", 0);
+            output_switch(g_out_w, g_out_h); fprintf(stderr, "[botw] key 3: 原生 2K\n"); return 1;
+        }
+    }
+#endif
     int next = !mfxup_enabled();
     dm_gfx_set_flag("mfx_output", next);
     dm_gfx_set_flag("mfx_upscale", next);
     fprintf(stderr, "[botw] key 3: %s\n", next ? "MetalFX 2K" : "关闭 2K");
     return 1;
 }
-#ifdef GAME_BOTW190
 /* Key 4 (runtime/input.c): ultrawide on / off (TOTK_ASPECT, default 21:9; also 32:9, 3440x1440 or 2.39; TOTK_ASPECT set
    also starts with it on). The game keeps drawing into its 16:9 canvas with the main camera's aspect ratio set to the wider
    one, so the picture holds the wider view squeezed horizontally; the present stretches it over the window
    (nvn_mtl.m present_stretch) and the UI drawn after the scene is squeezed back to the middle 16:9 (uw_ui_squeeze).
-   The main camera's projection is a sead::PerspectiveProjection (vtable main+0x1d05380; aspect +0xb0, dirty +8) at +0x38
+   The main camera's projection is a sead::PerspectiveProjection (1.9.0: vtable main+0x1d05380; aspect +0xb0, dirty +8) at +0x38
    in a singleton made at main+0x10ed664 (pointer main+0x1e39d10: two views at +0x28 and +0x118, each with its projection
    at +0x10). The game sets that aspect once, when the singleton is made, and recomputes the matrix every frame from the
    fields (the near plane changes per frame), so the ratio is written into the field and the projection marked dirty: at
    the next present after the key, and at every present while it is on (a new setup would write 16:9 again). Off puts
    16:9 back. Only a 16:9 value is replaced (the constructor's 4:3 before the setup is left alone); a main camera of
-   another class stops the game. 1.9.0 Mac only. */
+   another class stops the game. Mac only.
+   1.6.0 (2026-10-23): the same singleton, made inline after the "Camera" heap at main+0x1838a6c..0x1838be4 (the same
+   0x208-byte object, views at +0x28 / +0x118, the projection vtable stored at +0x38 and +0x128, the 4:3 aspect at
+   +0xe8, the dirty halfword at +0x40), pointer main+0x2cc4da0, projection vtable main+0x2bb4d48. */
+#ifdef GAME_BOTW190
+#define UW_CAMERA_SINGLETON 0x1e39d10
+#define UW_PERSPECTIVE_VTABLE 0x1d05380
+#else
+#define UW_CAMERA_SINGLETON 0x2cc4da0
+#define UW_PERSPECTIVE_VTABLE 0x2bb4d48
+#endif
 static uint8_t *g_uw_main;
 static float g_uw_wide;
 static _Atomic(uint32_t) g_uw_on;
 static int g_uw_written;   /* the field holds the wide ratio this code wrote (present thread only) */
+static _Atomic int g_uw_effective;   /* the wide ratio stayed in the field from one present to the next: the picture is wide */
 static float aspect_requested(void) {   /* TOTK's parser (aspect_math.h); "display" is not taken here */
     double a = aspect_parse(getenv("TOTK_ASPECT"));
     if (a < 0) runtime_fail("TOTK_ASPECT must be <w>:<h>, <w>x<h> or a ratio between 0.5 and 8");
     return (float)a;
 }
+#ifdef GAME_BOTW160
+/* 1.6.0 writes the main projection's aspect every frame (2026-10-23: a write of ours was undone 600 times in 10 s, the
+   picture flickered between wide and 16:9): the camera's update main+0x15c2030 pushes the active camera into the
+   singleton's views and stores the layer rectangle's width / height at main+0x15c214c (str s0, [x19, #0xe8]; x19 the
+   singleton, +0xe8 = projection +0x38 + aspect +0xb0). The straight run main+0x15c2118..0x15c214c (no branch lands in it)
+   is rewritten so that store takes a float from the data page after the module (+0x20) when it is not 0.0, else the
+   game's own ratio as shipped: near / far copied with one ldp / stp, the three repeated dirty-byte stores before the
+   aspect folded into one, x9 / s1..s3 / flags free there. Key 4 then only sets that word (g_uw_word). 1.9.0 has the
+   same path (main+0x10edaf8) yet kept a written ratio; not looked into. */
+static _Atomic uint32_t *g_uw_word;
+static void botw_aspect_writer(Module *m) {
+    static const uint32_t original[14] = {0x39010277, 0xb9406ec8, 0xb900d268, 0x39010277, 0xb94072c8, 0xb900d668, 0x39010277,
+                                          0x2d4806a0, 0x2d470ea2, 0x39010277, 0x1e233821, 0x1e223800, 0x1e211800, 0xbd00ea60};
+    const uint32_t at = 0x15c2118;
+    for (int i = 0; i < 14; i++) {
+        uint32_t w; memcpy(&w, m->base + at + 4 * i, 4);
+        if (w != original[i]) { fprintf(stderr, "[botw] ultrawide main+%#x: found %08x expected %08x\n", at + 4 * i, w, original[i]); runtime_fail("ultrawide requires the 1.6.0 camera update"); }
+    }
+    uint64_t data_off = (m->file_size + 0x3fff) & ~0x3fffULL;
+    if (data_off + 0x4000 != m->size) runtime_fail("ultrawide: no data page after the main module");
+    const uint64_t page = (uintptr_t)m->base + data_off;
+    const uint32_t patched[14] = {
+        0x39010277,   /* strb w23, [x19, #0x40]       dirty */
+        0x294da6c8,   /* ldp w8, w9, [x22, #0x6c]     near, far */
+        0x291a2668,   /* stp w8, w9, [x19, #0xd0] */
+        0x2d4806a0,   /* ldp s0, s1, [x21, #0x40]     the layer rectangle */
+        0x2d470ea2,   /* ldp s2, s3, [x21, #0x38] */
+        0x1e233821,   /* fsub s1, s1, s3 */
+        0x1e223800,   /* fsub s0, s0, s2 */
+        0x1e211800,   /* fdiv s0, s0, s1              the game's ratio */
+        adrp_reg(8, (uintptr_t)m->base + at + 32, page),
+        0xbd402101,   /* ldr s1, [x8, #0x20]          ours, 0.0 = none */
+        0x1e202028,   /* fcmp s1, #0.0 */
+        0x1e201c20,   /* fcsel s0, s1, s0, ne */
+        0x39010277,   /* strb w23, [x19, #0x40]       dirty */
+        0xbd00ea60,   /* str s0, [x19, #0xe8]         the aspect */
+    };
+    memcpy(m->base + at, patched, sizeof patched);
+    g_uw_word = (_Atomic uint32_t *)(void *)(page + 0x20);
+}
+static void botw_aspect_word(int on) { float v = on ? g_uw_wide : 0.0f; uint32_t b; memcpy(&b, &v, 4); if (g_uw_word) atomic_store(g_uw_word, b); }
+#else
+static void botw_aspect_writer(Module *m) { (void)m; }
+static void botw_aspect_word(int on) { (void)on; }
+#endif
 static void botw_aspect_install(Module *m) {
     float start = aspect_requested();
     g_uw_wide = start ? start : (float)ASPECT_WIDE;
     g_uw_main = m->base; atomic_store(&g_uw_on, start != 0);
-    fprintf(stderr, "[botw] 1.9.0 ultrawide: key 4 switches 16:9 / %.4f (TOTK_ASPECT), starts %s\n", g_uw_wide, start ? "wide" : "at 16:9");
+    botw_aspect_writer(m); botw_aspect_word(start != 0);
+    fprintf(stderr, "[botw] ultrawide: key 4 switches 16:9 / %.4f (TOTK_ASPECT), starts %s\n", g_uw_wide, start ? "wide" : "at 16:9");
 }
 static void botw_aspect_apply(void) {
     if (!g_uw_main) return;
-    uint64_t s; memcpy(&s, g_uw_main + 0x1e39d10, 8);
-    if (!s) return;   /* the camera singleton is not made yet */
+    uint64_t s; memcpy(&s, g_uw_main + UW_CAMERA_SINGLETON, 8);
+    if (!s) { static int told; if (atomic_load(&g_uw_on) && !told++) fprintf(stderr, "[botw] ultrawide: the main camera is not made yet\n"); return; }   /* the camera singleton is not made yet */
     uint8_t *proj = (uint8_t *)(uintptr_t)(s + 0x38);
     uint64_t vt; memcpy(&vt, proj, 8);
-    if (vt != (uintptr_t)g_uw_main + 0x1d05380) runtime_fail("ultrawide: the main camera is not a sead::PerspectiveProjection in this game version");
+    if (vt != (uintptr_t)g_uw_main + UW_PERSPECTIVE_VTABLE) runtime_fail("ultrawide: the main camera is not a sead::PerspectiveProjection in this game version");
     float now; memcpy(&now, proj + 0xb0, 4);
     const float game = 16.0f / 9.0f;
     if (atomic_load(&g_uw_on)) {
-        if (now == g_uw_wide) return;
+        if (now == g_uw_wide) { atomic_store(&g_uw_effective, 1); return; }
         if (fabsf(now - game) > 1e-4f) {   /* not set up yet (the constructor's 4:3) or another ratio: left as it is */
             static float told; if (now != told) { told = now; fprintf(stderr, "[botw] ultrawide: main camera aspect %g, not 16:9: left as it is\n", now); }
             return;
         }
-        memcpy(proj + 0xb0, &g_uw_wide, 4); g_uw_written = 1;
+        atomic_store(&g_uw_effective, 0);
+        memcpy(proj + 0xb0, &g_uw_wide, 4);
+        static unsigned rewrites;   /* the game set 16:9 again after a write of ours: it sets the aspect each frame here */
+        if (!g_uw_written && !rewrites) fprintf(stderr, "[botw] ultrawide: main camera %p, aspect %g -> %g\n", (void *)proj, now, g_uw_wide);
+        else if (g_uw_written && (++rewrites == 1 || rewrites % 600 == 0)) fprintf(stderr, "[botw] ultrawide: the game set 16:9 again (%u times)\n", rewrites);
+        g_uw_written = 1;
     } else {
         if (!g_uw_written || now != g_uw_wide) return;   /* only the ratio this code wrote is put back */
-        memcpy(proj + 0xb0, &game, 4); g_uw_written = 0;
+        memcpy(proj + 0xb0, &game, 4); g_uw_written = 0; atomic_store(&g_uw_effective, 0);
     }
     proj[8] = 1;   /* dirty: the matrix is rebuilt from the fields */
 }
-float runtime_aspect_now(void) { return g_uw_main && atomic_load(&g_uw_on) ? g_uw_wide : 0; }
+/* The present stretches the canvas only while the camera really draws wide (g_uw_effective): a ratio the game puts back,
+   or a camera not made yet, leaves the picture 16:9 instead of stretching it (2026-10-23, 1.6.0 stretched). */
+float runtime_aspect_now(void) { return g_uw_main && atomic_load(&g_uw_on) && atomic_load(&g_uw_effective) ? g_uw_wide : 0; }
 int runtime_aspect_toggle(void) {
     if (!g_uw_main) return 0;
-    int on = !atomic_load(&g_uw_on); atomic_store(&g_uw_on, on);
+    int on = !atomic_load(&g_uw_on); atomic_store(&g_uw_on, on); botw_aspect_word(on);
     fprintf(stderr, "[botw] key 4: aspect ratio %s\n", on ? "wide" : "16:9 (the game's own)");
     return 1;
 }
-/* Upstream's key 4 (#120) cycles 16:9 -> fit to the window -> 21:9 for TOTK; on 1.9.0 key 4 switches 16:9 / wide only, so
+/* Upstream's key 4 (#120) cycles 16:9 -> fit to the window -> 21:9 for TOTK; here key 4 switches 16:9 / wide only, so
    the panel sees step 0 or 2 and the window size is not followed. */
 int runtime_aspect_step(void) { return g_uw_main ? (atomic_load(&g_uw_on) ? 2 : 0) : -1; }
 void runtime_aspect_view(double w, double h) { (void)w; (void)h; }
-#else
-float runtime_aspect_now(void) { return 0; }
-int runtime_aspect_toggle(void) { return 0; }
-void runtime_aspect_view(double w, double h) { (void)w; (void)h; }
-int runtime_aspect_step(void) { return -1; }
-#endif

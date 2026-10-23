@@ -52,7 +52,7 @@ int mfxup_enabled(void) {
     int v = atomic_load_explicit(&g_on, memory_order_relaxed);
     if (v < 0) {
         const char *e = getenv("TOTK_MFX_UPSCALE");
-        v = e ? strcmp(e, "0") != 0 : 0;
+        v = e ? strcmp(e, "0") != 0 : TARGET_OS_IPHONE;   // the phone renders its scene at 960x540 by default (game_patches_v143.c render_res)
         atomic_store(&g_on, v);
         ULOG("MetalFX spatial upscaling (TOTK_MFX_UPSCALE): %s", v ? "on" : "off");
     }

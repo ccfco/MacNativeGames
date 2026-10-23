@@ -34,9 +34,12 @@ def update_nca(managed=True, title=TITLE):
 
 def fake_venv(tree):
     """A `.venv` whose python is this interpreter: build_app runs `<tree>/.venv/bin/python` for its scripts. Homebrew's
-    sys.prefix has no bin/python, so linking the prefix (as the tests did) only works on python.org installs."""
+    sys.prefix has no bin/python, so linking the prefix (as the tests did) only works on python.org installs. A script that
+    execs this interpreter by its own path, not a symlink: a venv's python finds its pyvenv.cfg (and so its packages,
+    cryptography among them) from the path it is started by."""
     (tree/'.venv'/'bin').mkdir(parents=True, exist_ok=True)
-    (tree/'.venv'/'bin'/'python').symlink_to(sys.executable)
+    (tree/'.venv'/'bin'/'python').write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
+    (tree/'.venv'/'bin'/'python').chmod(0o755)
     (tree/'.venv'/'bin'/'nsz').write_text('#!/bin/sh\nexit 0\n')   # build_app.py runs .venv/bin/nsz for NSZ sources
     (tree/'.venv'/'bin'/'nsz').chmod(0o755)
 
@@ -272,6 +275,8 @@ class Updates(unittest.TestCase):
                 signing.assert_called_once_with(out.with_name(out.name+'.partial'),self.root/'logs')
                 info=plistlib.loads((out/'Contents/Info.plist').read_bytes())
                 self.assertEqual(info['CFBundleShortVersionString'],display)
+                self.assertIn('zh-Hans',info['CFBundleLocalizations']);self.assertIn('zh-Hant',info['CFBundleLocalizations'])
+                self.assertEqual('pt-BR' in info['CFBundleLocalizations'],version=='v143')
                 res=out/'Contents/Resources/totk'
                 self.assertFalse((res/'build'/f'totk-native-{version}').exists())
                 self.assertTrue((res/'build/totk-native').exists())
