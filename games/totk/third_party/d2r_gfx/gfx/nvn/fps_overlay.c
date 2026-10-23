@@ -37,13 +37,23 @@ static const Glyph FONT[] = {
     {' ', {0, 0, 0, 0, 0, 0, 0}},
 };
 
-/* Key 1 cycles all -> minimal (FPS only) -> off -> all. */
-static _Atomic int g_hud_mode = HUD_MODE_ALL;
-int fps_overlay_hud_mode(void) { return atomic_load_explicit(&g_hud_mode, memory_order_relaxed); }
+/* Key 1 cycles all -> minimal (FPS only) -> off -> all. TOTK_HUD_MODE starts on show or off (the Settings pane);
+   minimal has no pane value and stays a keyboard-only state. */
+static _Atomic int g_hud_mode = -1;
+static int hud_mode_init(void) {
+    int v = atomic_load_explicit(&g_hud_mode, memory_order_relaxed);
+    if (v >= 0) return v;
+    const char *e = getenv("TOTK_HUD_MODE");
+    int n = e && !strcmp(e, "off") ? HUD_MODE_OFF : HUD_MODE_ALL;
+    int expected = -1;
+    if (!atomic_compare_exchange_strong_explicit(&g_hud_mode, &expected, n, memory_order_relaxed, memory_order_relaxed)) return expected;
+    return n;
+}
+int fps_overlay_hud_mode(void) { return hud_mode_init(); }
 int fps_overlay_hints_enabled(void) { return fps_overlay_hud_mode() != HUD_MODE_OFF; }
 int fps_overlay_full_hud(void) { return fps_overlay_hud_mode() == HUD_MODE_ALL; }
 int fps_overlay_toggle_hints(void) {
-    int mode = atomic_load_explicit(&g_hud_mode, memory_order_relaxed), next;
+    int mode = hud_mode_init(), next;
     do next = mode == HUD_MODE_ALL ? HUD_MODE_MINIMAL : mode == HUD_MODE_MINIMAL ? HUD_MODE_OFF : HUD_MODE_ALL;
     while (!atomic_compare_exchange_weak_explicit(&g_hud_mode, &mode, next, memory_order_relaxed, memory_order_relaxed));
     return next;
@@ -153,15 +163,16 @@ void fps_overlay_raster_line(const char *text, int highlight, int scale, uint8_t
 }
 
 void fps_overlay_text(const fps_overlay_info *info, char *text, size_t n) {
-    char fps[8], ss[12];
+    char fps[8], ss[12], miss[24] = "";
     if (info->fps < 0) snprintf(fps, sizeof fps, "--");
     else snprintf(fps, sizeof fps, "%d", info->fps > 999 ? 999 : info->fps);
     size_text(ss, sizeof ss, info->screen_w, info->screen_h);
+    if (info->missing > 0) snprintf(miss, sizeof miss, TOTK_UI("  缺 %d", "  %d missing"), info->missing > 999 ? 999 : info->missing);
     char gen[8] = "";
     if (info->gen > 0 && info->fps >= 0) snprintf(gen, sizeof gen, "+%d", info->gen > 999 ? 999 : info->gen);   // interpolated frames a second (key 2)
     // MetalFX did the upscale in the last frames (key 3 selects the manual MetalFX mode); 2K: true 2K output.
     // The whole line in the system font, so switching MetalFX does not switch the font.
-    snprintf(text, n, "FPS %s%s  %s%s%s", fps, gen, ss, info->mfx ? TOTK_UI("  MetalFX已开启", "  MetalFX on") : "", info->big ? "  2K" : "");
+    snprintf(text, n, "FPS %s%s  %s%s%s%s", fps, gen, ss, info->mfx ? TOTK_UI("  MetalFX已开启", "  MetalFX on") : "", info->big ? "  2K" : "", miss);
 }
 
 void fps_overlay_raster(const fps_overlay_info *info, int scale, uint8_t *out, int *box_w, int *box_h) {

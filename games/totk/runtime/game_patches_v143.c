@@ -10,6 +10,13 @@
 #include <stdatomic.h>
 #include <math.h>
 #include <TargetConditionals.h>
+#if TARGET_OS_IPHONE
+#if __has_include("totk_ios_canvas.h")
+#include "totk_ios_canvas.h"   // written by ios/tools/build_ipa.py: the canvas baked into this build
+#else
+#define TOTK_IOS_CANVAS_BAKED 0
+#endif
+#endif
 #if !TARGET_OS_IPHONE
 #include <mach/mach.h>
 #include <pthread.h>
@@ -303,51 +310,95 @@ void runtime_game_patches(Module *m) {
  * multiplies the canvas by that scale (8d860..8d894). Publishing only +0x508
  * changes the final crop but leaves every UI/composition target at 1080p.
  * Pending output changes are bit 21 of +8. Keep the original rebuild path. */
-static int output_full_at_start;
-static unsigned output_w,output_h;
+static unsigned output_canvas_w, output_canvas_h;
+static int output_full_at_start, output_decided;
 static _Atomic(uint8_t *) output_page;
 static uint64_t pack_size(unsigned w,unsigned h){return (uint64_t)h<<32|w;}
 uint64_t runtime_output_size_current(void){
     uint8_t *page=atomic_load(&output_page);
     return page?atomic_load((_Atomic uint64_t *)(void *)(page+32)):pack_size(1920,1080);
 }
-int runtime_output_res(unsigned *w,unsigned *h){
-    static int decided,on;static unsigned cw,ch;
-    if(!decided){
-        const char *e=getenv("TOTK_OUTPUT_RES");
-        /* iOS shows 720p only (the user, 2026-10-18): no larger swapchain, heaps or output there, whatever
-           TOTK_OUTPUT_RES says. The iOS export runs these patches on the Mac to make the phone's embedded code
-           (TOTK_EXPORT_IOS), so it follows the same rule: before, auto put the 2560x1440 swapchain into the phone's code,
-           and the phone, which carries the heap overlay in its bundle, reserved 88 MiB more for a picture it never shows. */
-        if(TARGET_OS_IPHONE||getenv("TOTK_EXPORT_IOS")){
-            on=0;
-            if(e&&*e&&strcmp(e,"0")&&strcmp(e,"auto"))fprintf(stderr,"[totk] TOTK_OUTPUT_RES=%s ignored: iOS shows 720p only\n",e);
-        }else if(e&&!strcmp(e,"0"))on=0;
-        else if(!e||!*e||!strcmp(e,"auto")){
+/* TOTK_OUTPUT_RES names one size (not "0"/"auto"), so both the export and the Mac start in it. */
+static int explicit_output_res(const char *e){return e&&*e&&strcmp(e,"0")&&strcmp(e,"auto");}
+/* The canvas baked into the game code: TOTK_OUTPUT_RES on the Mac (and in the iOS export), or TOTK_IOS_CANVAS_W/H in an
+   iOS build. The iOS app must initialize the data page even when the pane starts at 1080p, because the embedded veneer
+   writes [x19,#0x10] from it; runtime_output_res then stays 0 so the heaps and overlays are the 1080p ones. */
+static int output_configure(void){
+    if(output_decided)return output_canvas_w!=0;
+    output_decided=1;
+    const char *e=getenv("TOTK_OUTPUT_RES");
+#if TARGET_OS_IPHONE
+#if TOTK_IOS_CANVAS_BAKED
+    output_canvas_w=TOTK_IOS_CANVAS_W;output_canvas_h=TOTK_IOS_CANVAS_H;
+    const char *full=getenv("TOTK_IOS_OUTPUT_FULL");
+    output_full_at_start=full&&!strcmp(full,"1");
+    if(explicit_output_res(e))
+        fprintf(stderr,"[totk] TOTK_OUTPUT_RES=%s ignored: the iPad canvas is baked at %ux%u\n",e,output_canvas_w,output_canvas_h);
+    return 1;
+#else
+    if(explicit_output_res(e))
+        fprintf(stderr,"[totk] TOTK_OUTPUT_RES=%s ignored: this iOS build has no 2K canvas\n",e);
+    return 0;
+#endif
+#else
+    /* The export bakes one canvas into the phone's code; without an explicit size it bakes none. */
+    if(getenv("TOTK_EXPORT_IOS")&&!explicit_output_res(e))return 0;
+    if(!getenv("TOTK_EXPORT_IOS")){
+        if(e&&!strcmp(e,"0"))return 0;
+        if(!e||!*e||!strcmp(e,"auto")){
             const char *dir=getenv("TOTK_ROMFS_PATCHES_OUT");char path[4096];
             snprintf(path,sizeof path,"%s/2560x1440/manifest.tsv",dir?dir:"extracted/v143/romfs-patches-out");
-            FILE *f=fopen(path,"r");if(f){fclose(f);on=1;cw=2560;ch=1440;}
-            output_full_at_start=0;
-        }else{
-            char tail;
-            if(sscanf(e,"%ux%u%c",&cw,&ch,&tail)!=2||cw<640||ch<360||cw>7680||ch>4320)runtime_fail("TOTK_OUTPUT_RES must be auto, 0 or widthxheight");
-            on=1;output_full_at_start=1;
+            FILE *f=fopen(path,"r");if(!f)return 0;
+            fclose(f);
+            output_canvas_w=2560;output_canvas_h=1440;output_full_at_start=0;
+            return 1;
         }
-        decided=1;
     }
-    if(on){*w=cw;*h=ch;}return on;
+    char tail;
+    unsigned w,h;
+    if(sscanf(e,"%ux%u%c",&w,&h,&tail)!=2||w<640||h<360||w>7680||h>4320)runtime_fail("TOTK_OUTPUT_RES must be auto, 0 or widthxheight");
+    output_canvas_w=w;output_canvas_h=h;output_full_at_start=1;
+    return 1;
+#endif
+}
+/* The canvas the game renders into now: on iOS 0 in every mode but native 2K, so the 1080p heaps stay 1080p. */
+int runtime_output_res(unsigned *w,unsigned *h){
+    if(!output_configure())return 0;
+#if TARGET_OS_IPHONE
+    if(!output_full_at_start)return 0;
+#endif
+    *w=output_canvas_w;*h=output_canvas_h;return 1;
+}
+/* The canvas baked into the code (the veneer's size), which the data page must be initialized to even at 1080p. */
+static int output_max_res(unsigned *w,unsigned *h){
+    if(!output_configure())return 0;
+    *w=output_canvas_w;*h=output_canvas_h;return 1;
 }
 /* The canvas-sized and the scene-sized render targets share DynamicTextureAllocatorMem (113664 KiB at a 1080p canvas
  * and the 1600x900 scene). Each grows the heap by its own pixel ratio above the shipped size, a bigger scene with a 1.6
  * margin: measured 2026-10-19, a 3440x1440 canvas with a 2580x1080 scene crashed in the allocator (main+0x1c2d20) at
  * +258 MiB and loaded at +400 MiB. That was before render_res_publish divided out the game's own canvas scaling (the
  * scene was then about 4620x1935), so for the scene asked for the heaps are now larger than needed: safe, not tight.
- * The HeapDef overlay (scripts/make_output_res_overlay.py --scene) uses the same formula. Mac only: iOS keeps the
- * game's own heaps. */
+ * The HeapDef overlay (scripts/make_output_res_overlay.py --scene) uses the same formula. */
 static int render_res(unsigned *w,unsigned *h);
+#if TARGET_OS_IPHONE
+/* The phone ships HeapDef overlays for the scene sizes the Settings pane lists; an overlay the bundle lacks would stop
+   the game at overlay_init, so an unknown size falls back to the shipped 1600x900 instead of failing to start. */
+static int ios_scene_overlay(unsigned w,unsigned h){
+    if((double)w*h<=1600.0*900.0)return 1;
+    if(runtime_scene_overlay_available(w,h))return 1;
+    fprintf(stderr,"[totk] scene %ux%u: no HeapDef overlay in the bundle; using 1600x900\n",w,h);
+    return 0;
+}
+static int render_res_ios(unsigned *w,unsigned *h){
+    if(!render_res(w,h))return 0;
+    if(ios_scene_overlay(*w,*h))return 1;
+    *w=1600;*h=900;return 1;
+}
+#endif
 int runtime_render_res(unsigned *w,unsigned *h){
 #if TARGET_OS_IPHONE
-    (void)w;(void)h;return 0;
+    return render_res_ios(w,h);
 #else
     return !getenv("TOTK_EXPORT_IOS")&&render_res(w,h);
 #endif
@@ -362,7 +413,7 @@ uint64_t runtime_output_res_extra_bytes(void){
     uint64_t kib=(uint64_t)ceil(113664.0*(1+grow)/1024.0)*1024-113664;return kib<<10;
 }
 static void patch_output_res(Module *m){
-    unsigned w,h;if(!runtime_output_res(&w,&h))return;
+    unsigned w,h;if(!output_max_res(&w,&h))return;
     uint64_t data=(m->file_size+0x3fff)&~0x3fffULL,stub=((m->text_end+15)&~15ULL)+16;
     if(data+0x4000!=m->size||stub+28>((m->text_end+0x3fff)&~0x3fffULL))runtime_fail("1.4.3 output patch layout");
     const Patch guards[]={
@@ -387,21 +438,29 @@ static void patch_output_res(Module *m){
         0xf9028663, /* str x3,[x19,#0x508]: original active output write */
         branch(stub+24,0x3dcb30)};
  #if TARGET_OS_IPHONE
-    if(memcmp(m->base+stub,veneer,sizeof veneer))runtime_fail("1.4.3 embedded output veneer mismatch");
+    /* A 1080p start only needs the data page; the veneer is checked when the pane asks for native 2K, so a mismatch
+       there fails loudly instead of taking every picture mode down with it. */
+    if(output_full_at_start&&memcmp(m->base+stub,veneer,sizeof veneer))runtime_fail("1.4.3 embedded output veneer mismatch");
  #else
     memcpy(m->base+stub,veneer,sizeof veneer);
  #endif
     uint32_t words[]={0xd2800008|(w<<5),0xf2c00008|(h<<5),branch(0x3dcb28,stub)};
  #if TARGET_OS_IPHONE
-    for(unsigned i=0;i<3;i++){uint32_t got;memcpy(&got,m->base+guards[i].off,4);if(got!=words[i])runtime_fail("1.4.3 embedded output patch mismatch");}
+    if(output_full_at_start)
+        for(unsigned i=0;i<3;i++){uint32_t got;memcpy(&got,m->base+guards[i].off,4);if(got!=words[i])runtime_fail("1.4.3 embedded output patch mismatch");}
  #else
     for(unsigned i=0;i<3;i++)memcpy(m->base+guards[i].off,words+i,4);
  #endif
-    uint8_t *page=m->base+data;output_w=w;output_h=h;
+    uint8_t *page=m->base+data;
     atomic_store((_Atomic uint64_t *)(void *)(page+32),output_full_at_start?pack_size(w,h):pack_size(1920,1080));
     atomic_store((_Atomic uint64_t *)(void *)(page+40),0);
     atomic_store(&output_page,page);   /* Publish initialized state to the HUD on the main thread. */
-    fprintf(stderr,"[totk] 1.4.3 output: %ux%u swapchain; starts %s, key 3 cycles MetalFX / native / off; display-config veneer +%#llx\n",w,h,output_full_at_start?"at requested resolution":"at 1920x1080",(unsigned long long)stub);
+#if TARGET_OS_IPHONE
+    const char *control=" (Settings: picture mode, restart)";
+#else
+    const char *control=", key 3 cycles MetalFX / native / off";
+#endif
+    fprintf(stderr,"[totk] 1.4.3 output: %ux%u swapchain; starts %s%s; display-config veneer +%#llx\n",w,h,output_full_at_start?"at requested resolution":"at 1920x1080",control,(unsigned long long)stub);
 }
 /* Render resolution (TOTK_RENDER_RES=<w>x<h>, e.g. 960x540) - the 1.4.3 port of game_patches.c's patch.
    1.4.3 keeps the same graphics-parameter entry (+0x30 of the mode entry: handheld 1280x720, docked 1600x900) and the
@@ -437,8 +496,11 @@ static int render_res(unsigned *w,unsigned *h){
     return 1;
 }
 static void patch_render_res(Module *m){
-    unsigned w=1280,h=720;int set=render_res(&w,&h);
-#if !TARGET_OS_IPHONE
+    unsigned w=1280,h=720;
+#if TARGET_OS_IPHONE
+    int set=render_res_ios(&w,&h);
+#else
+    int set=render_res(&w,&h);
     if(!set)return;   /* Mac (and the iOS export): the game's own size unless asked */
 #endif
     uint64_t data=(m->file_size+0x3fff)&~0x3fffULL;
@@ -470,7 +532,7 @@ static void patch_render_res(Module *m){
     for(unsigned i=0;i<sizeof sites/sizeof *sites;i++)memcpy(m->base+sites[i].off,&want[i],4);
 #endif
     render_page=m->base+data;render_w=w;render_h=h;
-    render_res_publish(output_w?(unsigned)runtime_output_size_current():1920);
+    render_res_publish((unsigned)runtime_output_size_current());
     fprintf(stderr,"[totk] 1.4.3 render resolution patch: scene render size %ux%u%s (4 instructions at main+0x585e48, value on the data page)\n",
             w,h,set?"":" (the game's handheld size; TOTK_RENDER_RES not set)");
 }
@@ -498,20 +560,27 @@ static void patch_fixed_res(Module *m){
 #endif
 }
 int runtime_output_res_toggle(void){
+#if TARGET_OS_IPHONE
+    return 0;   /* iOS chooses the canvas in Settings at launch; switching here would skip the 2K heaps and overlay */
+#else
     if(!output_page)return 0;
     _Atomic uint64_t *size=(_Atomic uint64_t *)(void *)(output_page+32);
-    int full=atomic_load(size)!=pack_size(output_w,output_h);
-    atomic_store(size,full?pack_size(output_w,output_h):pack_size(1920,1080));
+    int full=atomic_load(size)!=pack_size(output_canvas_w,output_canvas_h);
+    atomic_store(size,full?pack_size(output_canvas_w,output_canvas_h):pack_size(1920,1080));
     uint64_t now=atomic_load(size);render_res_publish((unsigned)now);   /* the scene size first: the game rebuilds when told */
     uint64_t config=atomic_load((_Atomic uint64_t *)(void *)(output_page+40));
     if(config){__atomic_fetch_or((uint32_t *)(uintptr_t)(config+8),1u<<21,__ATOMIC_SEQ_CST);runtime_oe_push_message(30);}
     fprintf(stderr,"[totk] 1.4.3 output requested %ux%u (display config %s)\n",(unsigned)now,(unsigned)(now>>32),config?"ready":"not published yet");
     return 1;
+#endif
 }
 int runtime_output_mode_cycle(void){
+#if TARGET_OS_IPHONE
+    return 0;   /* iOS chooses the picture mode in Settings; this would flip MetalFX flags without its canvas */
+#else
     if(!output_page)return 0;
     extern int mfxup_output_enabled(void);extern void dm_gfx_set_flag(const char *,int);
-    int full=atomic_load((_Atomic uint64_t *)(void *)(output_page+32))==pack_size(output_w,output_h);
+    int full=atomic_load((_Atomic uint64_t *)(void *)(output_page+32))==pack_size(output_canvas_w,output_canvas_h);
     int native=0,mfx=0;const char *name;
     if(full)name="关闭 2K";
     else if(mfxup_output_enabled()){native=1;name="原生 2K";}
@@ -519,4 +588,5 @@ int runtime_output_mode_cycle(void){
     if(full!=native)runtime_output_res_toggle();
     dm_gfx_set_flag("mfx_output",mfx);dm_gfx_set_flag("mfx_upscale",mfx);
     fprintf(stderr,"[totk] key 3: %s\n",name);return 1;
+#endif
 }

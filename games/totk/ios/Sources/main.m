@@ -9,7 +9,14 @@
 #include <math.h>
 #include "runtime.h"
 #include "dmsh_chain.h"
+#include "settings_map.h"
+#if __has_include("totk_ios_canvas.h")
+#include "totk_ios_canvas.h"   // written by ios/tools/build_ipa.py: the canvas baked into this build
+#else
+#define TOTK_IOS_CANVAS_BAKED 0
+#endif
 #import "touch_pad.h"
+#import "save_backup.h"
 
 int totk_host_main(int argc, char **argv);
 void runtime_ios_attach_layer(CAMetalLayer *layer, UIView *host);
@@ -45,19 +52,24 @@ void runtime_shortcut_help_toggle(void) {}
         [self.view addSubview:say];
         return;
     }
-    /* Playback category (PR #97): plays with the ring / silent switch off and routes to the speaker. Without an active
-       session the game's CoreAudio output stays on a null sink on iOS 27 ("no device sink in use"); activating it in
-       didFinishLaunching blocked the main thread before the log file was opened. Interruptions: audio_observe. */
-    AVAudioSession *audio = AVAudioSession.sharedInstance;
-    NSError *catErr = nil, *actErr = nil;
-    [audio setCategory:AVAudioSessionCategoryPlayback mode:AVAudioSessionModeDefault options:0 error:&catErr];
-    BOOL activated = [audio setActive:YES error:&actErr];
-    fprintf(stderr, "[totk-audio] audio session category=%s active=%d route=%s err=%s%s\n",
-            audio.category.UTF8String ?: "?", (int)activated, audio.currentRoute.outputs.firstObject.portType.UTF8String ?: "?",
-            catErr ? catErr.localizedDescription.UTF8String : "none", actErr ? actErr.localizedDescription.UTF8String : "");
-    pthread_attr_t attr; pthread_attr_init(&attr); pthread_attr_setstacksize(&attr, 64u << 20);
-    pthread_t thread; pthread_create(&thread, &attr, run_host, NULL);
-    pthread_detach(thread); pthread_attr_destroy(&attr);
+    /* The backup folder (and a fresh install's restore) is settled before the game thread starts: the game opens its
+       save as it boots, and restoring under it would race that. Without a bookmark the player picks the folder now. */
+    [TOTKSaveBackup prepareFrom:self completion:^{
+        /* Playback category (PR #97): plays with the ring / silent switch off and routes to the speaker. Without an
+           active session the game's CoreAudio output stays on a null sink on iOS 27 ("no device sink in use");
+           activating it in didFinishLaunching blocked the main thread before the log file was opened. Activated here,
+           after the backup prompt, so a picker left open does not interrupt the player's music. */
+        AVAudioSession *audio = AVAudioSession.sharedInstance;
+        NSError *catErr = nil, *actErr = nil;
+        [audio setCategory:AVAudioSessionCategoryPlayback mode:AVAudioSessionModeDefault options:0 error:&catErr];
+        BOOL activated = [audio setActive:YES error:&actErr];
+        fprintf(stderr, "[totk-audio] audio session category=%s active=%d route=%s err=%s%s\n",
+                audio.category.UTF8String ?: "?", (int)activated, audio.currentRoute.outputs.firstObject.portType.UTF8String ?: "?",
+                catErr ? catErr.localizedDescription.UTF8String : "none", actErr ? actErr.localizedDescription.UTF8String : "");
+        pthread_attr_t attr; pthread_attr_init(&attr); pthread_attr_setstacksize(&attr, 64u << 20);
+        pthread_t thread; pthread_create(&thread, &attr, run_host, NULL);
+        pthread_detach(thread); pthread_attr_destroy(&attr);
+    }];
 }
 - (BOOL)prefersHomeIndicatorAutoHidden { return YES; }
 - (BOOL)prefersStatusBarHidden { return YES; }
@@ -103,6 +115,176 @@ static void audio_observe(void) {
     }];
 }
 
+/* apply_settings runs before the window scene exists, so there is no scene screen to ask yet. */
+static CGSize panel_size(void) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    return UIScreen.mainScreen.nativeBounds.size;
+#pragma clang diagnostic pop
+}
+static NSInteger panel_max_hz(void) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    return UIScreen.mainScreen.maximumFramesPerSecond;
+#pragma clang diagnostic pop
+}
+static NSDictionary *pref_row(NSDictionary *root, NSString *key) {
+    for (NSDictionary *item in root[@"PreferenceSpecifiers"] ?: @[])
+        if ([item[@"Key"] isEqual:key]) return item;
+    return nil;
+}
+
+/* Native 2K is baked into the app's game code at export. Only the panel the build was baked for can show it; another
+   device falls back to MetalFX 2K instead of starting a canvas it cannot size. */
+static BOOL native_canvas_supported(void) {
+#if TOTK_IOS_CANVAS_BAKED
+    CGSize s = panel_size();
+    return (MAX(s.width, s.height) == TOTK_IOS_CANVAS_W && MIN(s.width, s.height) == TOTK_IOS_CANVAS_H);
+#else
+    return NO;
+#endif
+}
+
+/* The Settings app pane is the single source of defaults: every TOTK_* row with a DefaultValue is registered, so the
+   game sees the same defaults before the player changes anything, then handed to the runtime as an environment
+   variable. Plain keys use overwrite=0, so devicectl can still supply them; the picture and frame modes then overwrite
+   the keys they own, because one mode must own the whole pipeline. */
+static void apply_settings(void) {
+    NSBundle *settings = [NSBundle bundleWithPath:[NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"Settings.bundle"]];
+    NSString *path = [settings pathForResource:@"Root" ofType:@"plist"];
+    NSDictionary *root = path ? [NSDictionary dictionaryWithContentsOfFile:path] : nil;
+    NSMutableDictionary *defaults = [NSMutableDictionary dictionary];
+    for (NSDictionary *item in root[@"PreferenceSpecifiers"] ?: @[]) {
+        NSString *key = item[@"Key"]; id value = item[@"DefaultValue"];
+        if (key.length && [key hasPrefix:@"TOTK_"] && value) defaults[key] = value;
+    }
+    /* A package without the pane is broken; do not keep a second, hand-copied copy of the defaults here. Each
+       consumer falls back to its own documented default (backup stays on, the picture and frame maps have theirs). */
+    if (!defaults.count) fprintf(stderr, "[totk] settings: no Settings.bundle defaults; using the runtime defaults\n");
+    fprintf(stderr, "[totk] settings: %lu defaults from %s\n", (unsigned long)defaults.count, path.UTF8String ?: "no Settings.bundle");
+    NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+    [d registerDefaults:defaults];
+    for (NSString *key in defaults) {
+        id value = [d objectForKey:key];
+        if ([value isKindOfClass:NSNumber.class]) {
+            setenv(key.UTF8String, [value boolValue] ? "1" : "0", 0);
+        } else if ([value isKindOfClass:NSString.class] && [value length]) {
+            if ([value length] < 64) setenv(key.UTF8String, [value UTF8String], 0);
+        }
+        /* overwrite=0: a devicectl value for a plain key still wins. The picture and frame blocks below own their keys
+           and replace them. */
+    }
+    /* Before the pane existed, the drawable height was the only display choice. Adopt a stored choice once so an
+       upgrade keeps the player's cooler or sharper setting instead of silently starting in the new default mode. */
+    NSDictionary *stored = [d persistentDomainForName:NSBundle.mainBundle.bundleIdentifier] ?: @{};
+    if (!stored[@"TOTK_IOS_PICTURE_MODE"]) {
+        NSString *old = stored[@"TOTK_IOS_DRAWABLE_H"];
+        NSString *migrated = [old isEqualToString:@"720"] ? @"720" : [old isEqualToString:@"1080"] ? @"1080" : old ? @"mfx" : nil;
+        if (migrated) {
+            [d setObject:migrated forKey:@"TOTK_IOS_PICTURE_MODE"];
+            fprintf(stderr, "[totk] settings: old drawable %s -> picture mode %s\n", old.UTF8String, migrated.UTF8String);
+        }
+    }
+    /* One picture mode owns the canvas, the drawable and the two MetalFX stages. It overwrites those keys because a
+       mode must not be contradicted by a key it owns. */
+    NSString *picture = [d stringForKey:@"TOTK_IOS_PICTURE_MODE"];
+    totk_picture_env penv;
+    totk_picture_env_parse(totk_picture_mode_default(), &penv);   // a valid fallback if the stored value is stale
+    if (!totk_picture_env_parse(picture.UTF8String, &penv)) {
+        fprintf(stderr, "[totk] settings: picture mode \"%s\" is not a pane value; using %s\n",
+                picture.UTF8String ?: "", totk_picture_mode_default());
+        picture = [NSString stringWithUTF8String:totk_picture_mode_default()];
+    }
+    if (penv.native_canvas[0] == '1' && !native_canvas_supported()) {
+        CGSize s = panel_size();
+        fprintf(stderr, "[totk] settings: native 2K is baked for another panel (this one is %.0fx%.0f); using MetalFX 2K\n",
+                s.width, s.height);
+        picture = @"mfx";
+        totk_picture_env_parse(picture.UTF8String, &penv);
+    }
+    setenv("TOTK_IOS_DRAWABLE_H", penv.drawable, 1);
+    setenv("TOTK_MFX_UPSCALE", penv.scene_upscale, 1);
+    setenv("TOTK_MFX_OUTPUT", penv.output_upscale, 1);
+    setenv("TOTK_IOS_OUTPUT_FULL", penv.native_canvas, 1);
+    /* Frame rate is two independent choices: a cap, and whether MetalFX fills the frame between two game frames. */
+    NSString *cap = [d stringForKey:@"TOTK_FPS_CAP"];
+    BOOL interp = [d boolForKey:@"TOTK_MFX_INTERP"];
+    /* Before the two switches existed, "interp" was a frame-mode value; adopt it once. */
+    if ([cap isEqualToString:@"interp"]) {
+        cap = [NSString stringWithUTF8String:totk_frame_cap_default()];
+        interp = YES;
+        [d setObject:cap forKey:@"TOTK_FPS_CAP"];
+        [d setBool:YES forKey:@"TOTK_MFX_INTERP"];
+        fprintf(stderr, "[totk] settings: old frame mode interp -> %s fps with interpolation\n", cap.UTF8String);
+    }
+    totk_frame_env fenv;
+    if (!totk_frame_env_build(cap.UTF8String, interp, &fenv)) {
+        fprintf(stderr, "[totk] settings: frame cap \"%s\" is not a pane value; using %s\n",
+                cap.UTF8String ?: "", totk_frame_cap_default());
+        cap = [NSString stringWithUTF8String:totk_frame_cap_default()];
+        interp = NO;
+        [d setObject:cap forKey:@"TOTK_FPS_CAP"];
+        [d setBool:NO forKey:@"TOTK_MFX_INTERP"];
+        totk_frame_env_build(cap.UTF8String, interp, &fenv);
+    }
+    if (interp && [cap isEqualToString:@"120"]) {
+        fprintf(stderr, "[totk] settings: interpolation has no headroom at 120 fps; turning it off\n");
+        interp = NO;
+        [d setBool:NO forKey:@"TOTK_MFX_INTERP"];
+        totk_frame_env_build(cap.UTF8String, interp, &fenv);
+    }
+    /* 120 Hz is needed both for the 120 cap and for 60 + interpolation; on a 60 Hz panel run 60 without it. */
+    if (fenv.present_hz && !strcmp(fenv.present_hz, "120") && panel_max_hz() < 120) {
+        fprintf(stderr, "[totk] settings: %s fps%s needs 120 Hz; this panel is %ld Hz, using 60 without interpolation\n",
+                cap.UTF8String, interp ? " with interpolation" : "", (long)panel_max_hz());
+        cap = [NSString stringWithUTF8String:totk_frame_cap_default()];
+        interp = NO;
+        [d setObject:cap forKey:@"TOTK_FPS_CAP"];
+        [d setBool:NO forKey:@"TOTK_MFX_INTERP"];
+        totk_frame_env_build(cap.UTF8String, interp, &fenv);
+    }
+    if (fenv.present_hz) setenv("DM_PRESENT_HZ", fenv.present_hz, 1); else unsetenv("DM_PRESENT_HZ");
+    if (fenv.fps) setenv("DM_FPS", fenv.fps, 1); else unsetenv("DM_FPS");
+    setenv("TOTK_MFX", fenv.interp, 1);
+    /* A scene stored by the old free-form pane may not be one of the pane's values any more; adopt its default
+       instead of leaving a value the pane cannot represent. A valid devicectl value still wins: the loop above left
+       the environment alone, so use the effective value and only overwrite an invalid one. */
+    NSDictionary *scene_row = pref_row(root, @"TOTK_RENDER_RES");
+    NSArray *scene_values = scene_row[@"Values"] ?: @[];
+    NSString *fallback = scene_row[@"DefaultValue"] ?: @"1600x900";
+    NSString *storedScene = [d stringForKey:@"TOTK_RENDER_RES"];
+    if (!storedScene.length) storedScene = fallback;
+    const char *from_env = getenv("TOTK_RENDER_RES");
+    NSString *scene = from_env && *from_env ? @(from_env) : storedScene;
+    BOOL pane_values = scene_values.count > 0, env_valid = !pane_values || [scene_values containsObject:scene];
+    if (!env_valid) {
+        fprintf(stderr, "[totk] settings: scene \"%s\" is not a pane value; using %s\n", scene.UTF8String ?: "", storedScene.UTF8String);
+        scene = storedScene;
+    }
+    if (pane_values && ![scene_values containsObject:scene]) {
+        fprintf(stderr, "[totk] settings: stored scene \"%s\" is not a pane value; using %s\n", scene.UTF8String ?: "", fallback.UTF8String);
+        scene = fallback;
+        [d setObject:scene forKey:@"TOTK_RENDER_RES"];
+    }
+    setenv("TOTK_RENDER_RES", scene.UTF8String, env_valid ? 0 : 1);
+    NSString *drawable = [NSString stringWithUTF8String:penv.drawable];
+    /* getenv, not the stored switches: the picture mode may have overridden them. */
+    fprintf(stderr, "[totk] settings: picture %s, display %s, scene %s, fps %s, interp %d (hz %s, fps %s, mfx %s), aspect %s, hud %s, taa %d, mfx %s/%s, full %s, keyboard %s, touch-with-keyboard %d, backup %d\n",
+            picture.UTF8String ?: "mfx",
+            drawable.UTF8String ?: "?",
+            scene.UTF8String ?: "?",
+            cap.UTF8String ?: "60", (int)interp,
+            getenv("DM_PRESENT_HZ") ?: "-", getenv("DM_FPS") ?: "-", getenv("TOTK_MFX") ?: "-",
+            [[d stringForKey:@"TOTK_ASPECT"] UTF8String] ?: "?",
+            [[d stringForKey:@"TOTK_HUD_MODE"] UTF8String] ?: "all",
+            (int)[d boolForKey:@"TOTK_TAA"],
+            getenv("TOTK_MFX_UPSCALE") ?: "1", getenv("TOTK_MFX_OUTPUT") ?: "1",
+            getenv("TOTK_IOS_OUTPUT_FULL") ?: "0",
+            [[d stringForKey:@"TOTK_KEYBOARD"] UTF8String] ?: "auto",
+            (int)[d boolForKey:@"TOTK_TOUCH_WITH_KEYBOARD"],
+            (int)[d boolForKey:@"TOTK_BACKUP"]);
+}
+
 @interface TOTKApp : UIResponder <UIApplicationDelegate> @end
 @implementation TOTKApp
 - (UISceneConfiguration *)application:(UIApplication *)application configurationForConnectingSceneSession:(UISceneSession *)session options:(UISceneConnectionOptions *)options {
@@ -124,6 +306,7 @@ static void audio_observe(void) {
     for (NSString *name in @[@"save", @"temp", @"shader-cache", @"game-slot"]) [fm createDirectoryAtPath:[docs stringByAppendingPathComponent:name] withIntermediateDirectories:YES attributes:nil error:nil];
     NSString *log = [docs stringByAppendingPathComponent:@"log.txt"];
     if (freopen(log.fileSystemRepresentation,"w",stderr)) setvbuf(stderr,NULL,_IOLBF,0);
+    apply_settings();
     setenv("TOTK_ROMFS",[res stringByAppendingPathComponent:@"romfs"].fileSystemRepresentation,1);
     /* The 17 GB image may live in Documents/GameData instead of the app (romfs.bin or romfs.bin.000, ...; ios/tools/
        install_device.py --game-data puts it there): a new build then installs without it, and reinstalling keeps it.
@@ -148,11 +331,6 @@ static void audio_observe(void) {
         fprintf(stderr, "[totk] no game image: %s\n", g_no_game_data.UTF8String);
     }
     setenv("TOTK_OPERATION_MODE","handheld",1);
-    // Game language: the Settings app (Settings.bundle › TOTK_LANG) stores the choice in our defaults; empty means the
-    // system language, which is what the runtime already follows. iOS 27 does not honour Info.plist LSEnvironment, so
-    // the value must be applied here. overwrite=0 keeps devicectl --environment-variables winning when testing from the Mac.
-    NSString *lang = [NSUserDefaults.standardUserDefaults stringForKey:@"TOTK_LANG"];
-    if (lang.length>0&&lang.length<8) setenv("TOTK_LANG",lang.UTF8String,0);
     setenv("TOTK_ROMFS_PATCHES",[res stringByAppendingPathComponent:@"romfs-patches"].fileSystemRepresentation,1);
     setenv("TOTK_ROMFS_PATCHES_OUT",[res stringByAppendingPathComponent:@"romfs-patches-out"].fileSystemRepresentation,1);
     setenv("TOTK_SHARED_FONTS",[res stringByAppendingPathComponent:@"shared-fonts"].fileSystemRepresentation,1);

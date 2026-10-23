@@ -10,9 +10,263 @@
 			<key>Type</key>
 			<string>PSGroupSpecifier</string>
 			<key>Title</key>
-			<string>遊戲語言 · Game language</string>
+			<string>画面 · Display</string>
 			<key>FooterText</key>
-			<string>重新啟動遊戲後生效 · takes effect after relaunching the game</string>
+			<string>先选画质模式，场景分辨率和帧率再按需调整。想更稳：1080p + 1280x720 + 30 帧补到 60（或 60 帧）；想更清晰：MetalFX 2K + 1600x900 + 60 帧。重启游戏后生效 · choose a picture mode first; scene resolution and frame rate are separate. Steadiest: 1080p + 1280x720 + 30 interpolated to 60 (or 60 fps); sharpest: MetalFX 2K + 1600x900 + 60 fps. Takes effect after relaunching</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSRadioGroupSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_IOS_PICTURE_MODE</string>
+			<key>Title</key>
+			<string>画质模式 · Picture mode</string>
+			<key>DefaultValue</key>
+			<string>mfx</string>
+			<key>Values</key>
+			<array>
+				<string>mfx</string>
+				<string>native</string>
+				<string>1080</string>
+				<string>720</string>
+			</array>
+			<key>Titles</key>
+			<array>
+				<string>MetalFX 2K（推荐）· MetalFX 2K (recommended)</string>
+				<string>原生 2K（最清晰，最热）· Native 2K (sharpest, hottest)</string>
+				<string>1080p（更凉）· 1080p (cooler)</string>
+				<string>720p（最省电）· 720p (lowest power)</string>
+			</array>
+			<key>FooterText</key>
+			<string>MetalFX 2K：默认，1080p 画布用场景和输出两段 MetalFX 放大到面板，文字更清楚；1080p：约 1919x1323 显示缓冲，不做输出 MetalFX，更凉；原生 2K：使用构建时烘焙的画布（默认构建面向 11 英寸 M5 iPad，2420x1668），文字真正原生，3D 仍按场景分辨率渲染，发热最高，其他面板自动回退；720p：更小缓冲，最省电。 · MetalFX 2K: the default, a 1080p canvas upscaled to the panel by both MetalFX stages for clearer text; 1080p: about a 1919x1323 drawable with no output MetalFX, cooler; Native 2K: the canvas baked into this build (the default targets the 11-inch M5 iPad, 2420x1668) for native text (3D stays at the scene resolution; hottest; other panels fall back); 720p: a smaller drawable, lowest power.</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSRadioGroupSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_RENDER_RES</string>
+			<key>Title</key>
+			<string>场景分辨率 · Scene resolution</string>
+			<key>DefaultValue</key>
+			<string>1600x900</string>
+			<key>Values</key>
+			<array>
+				<string>1600x900</string>
+				<string>1920x1080</string>
+				<string>1280x720</string>
+				<string>960x540</string>
+			</array>
+			<key>Titles</key>
+			<array>
+				<string>1600x900（推荐）· 1600x900 (recommended)</string>
+				<string>1920x1080（清晰，更热）· 1920x1080 (sharper, hotter)</string>
+				<string>1280x720（流畅，更凉）· 1280x720 (cooler)</string>
+				<string>960x540（最省电）· 960x540 (coolest)</string>
+			</array>
+			<key>FooterText</key>
+			<string>只影响 3D 世界，和画质模式独立。1920x1080 比 1600x900 多 44% 像素，发热明显；1280x720 / 960x540 更省电。重场景掉帧时优先降到 1280x720。 · Affects the 3D world only, independent of the picture mode. 1920x1080 renders 44% more pixels and runs hotter; 1280x720 / 960x540 are cooler. If busy areas drop frames, try 1280x720 first.</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSRadioGroupSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_FPS_CAP</string>
+			<key>Title</key>
+			<string>帧率上限 · Frame rate cap</string>
+			<key>DefaultValue</key>
+			<string>60</string>
+			<key>Values</key>
+			<array>
+				<string>30</string>
+				<string>60</string>
+				<string>120</string>
+			</array>
+			<key>Titles</key>
+			<array>
+				<string>30 帧（省电）· 30 fps</string>
+				<string>60 帧（推荐）· 60 fps</string>
+				<string>120 帧（最热）· 120 fps</string>
+			</array>
+			<key>FooterText</key>
+			<string>30 最省电但最不流畅；60 推荐；120 最顺滑也最热。120 需要 120 Hz 面板，60 Hz 设备自动回退到 60。重启游戏后生效 · 30 saves power but is the least smooth; 60 is recommended; 120 is the smoothest and hottest. 120 needs a 120 Hz panel; a 60 Hz device falls back to 60. Takes effect after relaunching</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSToggleSwitchSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_MFX_INTERP</string>
+			<key>Title</key>
+			<string>MetalFX 补帧 · MetalFX interpolation</string>
+			<key>DefaultValue</key>
+			<false/>
+			<key>FooterText</key>
+			<string>开启后：30 帧补到 60，60 帧补到 120；120 帧本身没有余量，补帧不生效。约多一帧延迟，快速移动可能有伪影（实验）。重启游戏后生效 · on: 30→60, 60→120; 120 has no headroom, so it does nothing there. About one frame of latency and possible motion artifacts (experimental). Takes effect after relaunching</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSRadioGroupSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_ASPECT</string>
+			<key>Title</key>
+			<string>画面比例 · Aspect ratio</string>
+			<key>DefaultValue</key>
+			<string>display</string>
+			<key>Values</key>
+			<array>
+				<string>display</string>
+				<string>0</string>
+			</array>
+			<key>Titles</key>
+			<array>
+				<string>填满屏幕 · Fill the screen</string>
+				<string>16:9（黑边）· 16:9 letterbox</string>
+			</array>
+			<key>FooterText</key>
+			<string>填满屏幕不拉伸画面：相机按屏幕比例取景，呈现时再还原比例。iPad 比 16:9 窄，所以两侧会少一点、上下填满；16:9 保留完整宽度并加黑边。少数 UI 特效可能偏移（实验性）· fill does not stretch: the camera takes the screen's aspect and the present pass restores the proportions. An iPad is narrower than 16:9, so a little is lost at the sides and the height is filled; 16:9 keeps the full width with bars. A few UI effects may sit off (experimental)</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSToggleSwitchSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_TAA</string>
+			<key>Title</key>
+			<string>边缘平滑（MetalFX 时间抗锯齿）· Edge smoothing (MetalFX TAA)</string>
+			<key>DefaultValue</key>
+			<false/>
+			<key>FooterText</key>
+			<string>对 3D 画面做时间性抗锯齿，边缘更稳；可能有轻微拖影，默认关闭。重启游戏后生效 · temporal anti-aliasing of the 3D scene; slight ghosting is possible. Off by default; takes effect after relaunching</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+			<key>Title</key>
+			<string>界面 · Interface</string>
+			<key>FooterText</key>
+			<string>重启游戏后生效 · takes effect after relaunching</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSRadioGroupSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_HUD_MODE</string>
+			<key>Title</key>
+			<string>状态行 · Status line</string>
+			<key>DefaultValue</key>
+			<string>all</string>
+			<key>Values</key>
+			<array>
+				<string>all</string>
+				<string>off</string>
+			</array>
+			<key>Titles</key>
+			<array>
+				<string>显示（FPS、MetalFX、分辨率）· Show</string>
+				<string>关闭（更沉浸）· Off</string>
+			</array>
+			<key>FooterText</key>
+			<string>开启时右上角显示帧率、MetalFX 状态和分辨率，行尾是待补译的着色器数量；关闭后整行隐藏 · shows FPS, MetalFX and resolution in the top-right, with the number of shaders waiting for translation; off hides the line</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+			<key>Title</key>
+			<string>手柄与键盘 · Controller and keyboard</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSToggleSwitchSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_GYRO</string>
+			<key>Title</key>
+			<string>手柄陀螺仪 · Controller gyroscope</string>
+			<key>DefaultValue</key>
+			<true/>
+			<key>FooterText</key>
+			<string>需要带陀螺仪的手柄（DualSense / DualShock / Switch Pro）· needs a controller with a gyroscope</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSToggleSwitchSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_RUMBLE</string>
+			<key>Title</key>
+			<string>手柄震动 · Controller rumble</string>
+			<key>DefaultValue</key>
+			<true/>
+			<key>FooterText</key>
+			<string>需要支持 HD 震动的手柄 · needs a controller with haptics</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSRadioGroupSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_KEYBOARD</string>
+			<key>Title</key>
+			<string>键盘 · Keyboard</string>
+			<key>DefaultValue</key>
+			<string>auto</string>
+			<key>Values</key>
+			<array>
+				<string>auto</string>
+				<string>off</string>
+			</array>
+			<key>Titles</key>
+			<array>
+				<string>自动（连接时启用）</string>
+				<string>关闭</string>
+			</array>
+			<key>FooterText</key>
+			<string>妙控键盘、智能键盘或蓝牙键盘均可；关闭后只用触屏和手柄，防止键盘异常时无法操作 · works with a Magic Keyboard, Smart Keyboard or Bluetooth keyboard; off keeps touch and controllers only</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSToggleSwitchSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_TOUCH_WITH_KEYBOARD</string>
+			<key>Title</key>
+			<string>连接键盘时保留触屏 · Keep touch with a keyboard</string>
+			<key>DefaultValue</key>
+			<false/>
+			<key>FooterText</key>
+			<string>默认像手柄一样收起触控层；打开后键盘和触屏同时可用 · the touch layer hides for a keyboard by default; on keeps both</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+			<key>Title</key>
+			<string>存档 · Save</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSToggleSwitchSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_BACKUP</string>
+			<key>Title</key>
+			<string>iCloud Drive 自动备份 · iCloud Drive backup</string>
+			<key>DefaultValue</key>
+			<true/>
+			<key>FooterText</key>
+			<string>默认开启。首次启动会提示选择一次 iCloud Drive 文件夹；save 和 game-slot 会自动镜像过去，删 App 也不会丢。选「以后再说」后不再自动提示；要换文件夹，打开下面的开关。 · on by default. The first launch asks once for an iCloud Drive folder; save and game-slot are mirrored there and survive deleting the app. “Later” is remembered, so it does not ask again; to change the folder, turn on the switch below.</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSToggleSwitchSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_BACKUP_RECONFIGURE</string>
+			<key>Title</key>
+			<string>重新选择备份文件夹 · Choose the backup folder again</string>
+			<key>DefaultValue</key>
+			<false/>
+			<key>FooterText</key>
+			<string>打开后，下次启动游戏会清除当前文件夹并重新选择；随后开关自动关闭。 · at the next launch the app forgets the current folder and asks again; the switch then turns itself off.</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+			<key>Title</key>
+			<string>游戏语言 · Game language</string>
+			<key>FooterText</key>
+			<string>重新启动游戏后生效 · takes effect after relaunching the game</string>
 		</dict>
 		<dict>
 			<key>Type</key>

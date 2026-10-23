@@ -9,7 +9,11 @@
 static _Atomic uint64_t page[8];
 void shortcut_test_output_init(void) {
     assert(runtime_output_size_current() == pack_size(1920, 1080));
-    output_w = 2560; output_h = 1440;
+#if defined(TOTK_GAME_V143)
+    output_canvas_w = 2560; output_canvas_h = 1440;   /* 1.4.3: the baked canvas */
+#else
+    output_w = 2560; output_h = 1440;                 /* 1.2.1 and earlier: the swapchain size */
+#endif
     atomic_store(&page[4], pack_size(1920, 1080));
     atomic_store(&output_page, (uint8_t *)page);
 }
