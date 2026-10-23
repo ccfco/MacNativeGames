@@ -20,6 +20,8 @@
 static NSString *const kBookmark = @"TOTK_BACKUP_BOOKMARK";
 static NSString *const kDeclined = @"TOTK_BACKUP_DECLINED";   // "Later" was chosen: do not ask again on every launch
 static NSString *const kReconfigure = @"TOTK_BACKUP_RECONFIGURE";   // a Settings switch: forget the folder and ask again
+static NSString *const kImportRequest = @"TOTK_SAVE_IMPORT";   // a Settings switch: pick a save folder on the next launch
+static NSString *const kBeforeImport = @"save-before-import";   // the folder the import replaces, kept for one mistake
 /* The folder this game keeps inside the picked one: the game's own name, so a shared iCloud Drive folder reads clearly. */
 static NSString *game_folder(void) {
     NSString *name = [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleDisplayName"];
@@ -30,6 +32,8 @@ static const char *const kDirectoryEnvs[] = {"TOTK_PROFILE_DIR", "TOTK_GAME_SLOT
 
 @interface TOTKSaveBackup () <UIDocumentPickerDelegate>
 @property (nonatomic, copy) void (^pickCompletion)(BOOL);
+@property (nonatomic, copy) void (^importCompletion)(void);   // a picked folder is being imported, not adopted as the backup
+@property (nonatomic, weak) UIViewController *importHost;
 - (void)prepareFrom:(UIViewController *)host completion:(void (^)(void))ready;
 - (void)explain:(UIViewController *)host choose:(void (^)(void))choose later:(void (^)(void))later;
 - (void)chooseFrom:(UIViewController *)host completion:(void (^)(BOOL))completion;
@@ -76,6 +80,13 @@ static const char *const kDirectoryEnvs[] = {"TOTK_PROFILE_DIR", "TOTK_GAME_SLOT
 
 - (void)prepareFrom:(UIViewController *)host completion:(void (^)(void))ready {
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    /* A one-shot request from Settings: clear it first, so a launch that dies mid-way cannot loop the picker. The
+       import runs before the game thread; the normal backup flow follows it. */
+    if ([defaults boolForKey:kImportRequest]) {
+        [defaults setBool:NO forKey:kImportRequest];
+        [self importFrom:host completion:^{ [self prepareFrom:host completion:ready]; }];
+        return;
+    }
     if (!TOTKSaveBackup.enabled) {
         /* Turning backup off also forgets an earlier "Later", so turning it on again asks for a folder. */
         [defaults removeObjectForKey:kDeclined];
@@ -194,6 +205,14 @@ static const char *const kDirectoryEnvs[] = {"TOTK_PROFILE_DIR", "TOTK_GAME_SLOT
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
     (void)controller;
     NSURL *picked = urls.firstObject;
+    if (self.importCompletion) {
+        void (^done)(void) = self.importCompletion; self.importCompletion = nil;
+        /* The confirmation alert is presented from the same host: wait until the picker is gone, or UIKit refuses it. */
+        [controller dismissViewControllerAnimated:YES completion:^{
+            if (picked) [self importPicked:picked completion:done]; else done();
+        }];
+        return;
+    }
     BOOL ok = picked && [self adopt:picked];
     if (ok) {
         NSError *error = nil;
@@ -209,6 +228,12 @@ static const char *const kDirectoryEnvs[] = {"TOTK_PROFILE_DIR", "TOTK_GAME_SLOT
 
 - (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {
     (void)controller;
+    if (self.importCompletion) {
+        void (^done)(void) = self.importCompletion; self.importCompletion = nil;
+        fprintf(stderr, "[totk-save] import folder not chosen\n");
+        done();
+        return;
+    }
     void (^completion)(BOOL) = self.pickCompletion; self.pickCompletion = nil;
     fprintf(stderr, "[totk-save] backup folder not chosen; saves stay in Documents\n");
     if (completion) completion(NO);
@@ -239,6 +264,130 @@ static const char *const kDirectoryEnvs[] = {"TOTK_PROFILE_DIR", "TOTK_GAME_SLOT
         return NO;
     }
     return YES;
+}
+
+/* The one-shot import the Settings switch asks for: pick a folder, confirm, keep what is replaced, copy its save in.
+   Nothing is removed before a complete copy of the import sits in a temporary folder next to the live one, and the
+   replaced save is kept under Documents/save-before-import. */
+- (void)importFrom:(UIViewController *)host completion:(void (^)(void))done {
+    if (!host) { done(); return; }
+    self.importHost = host;
+    UIDocumentPickerViewController *picker =
+        [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeFolder] asCopy:NO];
+    picker.allowsMultipleSelection = NO;
+    picker.delegate = self;
+    __block BOOL answered = NO;
+    void (^finish)(void) = ^{
+        if (answered) return;
+        answered = YES;
+        self.importCompletion = nil;
+        done();
+    };
+    self.importCompletion = finish;
+    [host presentViewController:picker animated:YES completion:^{
+        if (host.presentedViewController != picker) finish();
+    }];
+    /* Like the backup folder: a picker that never answers must not keep the game from starting. */
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(300 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (answered) return;
+        fprintf(stderr, "[totk-save] import picker did not answer in 5 minutes; starting with the current save\n");
+        [picker dismissViewControllerAnimated:YES completion:nil];
+        finish();
+    });
+}
+
+/* The picked folder is either the game's own folder or a parent that holds it; the backup folder has the same shape,
+   so a backup can be imported the same way. */
+- (NSURL *)saveSourceIn:(NSURL *)folder {
+    NSURL *named = [folder URLByAppendingPathComponent:game_folder() isDirectory:YES];
+    for (NSURL *candidate in @[named, folder])
+        if ([NSFileManager.defaultManager fileExistsAtPath:[[candidate URLByAppendingPathComponent:kDirectories[0]] path]])
+            return candidate;
+    return nil;
+}
+
+- (void)importPicked:(NSURL *)picked completion:(void (^)(void))done {
+    BOOL scoped = [picked startAccessingSecurityScopedResource];
+    NSURL *source = [self saveSourceIn:picked];
+    if (!source) {
+        fprintf(stderr, "[totk-save] %s holds no save; import skipped\n", picked.path.UTF8String);
+        if (scoped) [picked stopAccessingSecurityScopedResource];
+        done();
+        return;
+    }
+    UIViewController *host = self.importHost;
+    if (!host) { if (scoped) [picked stopAccessingSecurityScopedResource]; done(); return; }
+    NSString *message = [NSString stringWithFormat:@"%@\n\n%@", picked.path,
+        @(TOTK_UI("导入后会替换当前存档；当前存档会先备份到 App 的 Documents/save-before-import。",
+                  "Importing replaces the current save; it is first kept in the app's Documents/save-before-import."))];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@(TOTK_UI("导入存档？", "Import this save?"))
+                                                                  message:message
+                                                           preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@(TOTK_UI("取消", "Cancel")) style:UIAlertActionStyleCancel
+                                            handler:^(UIAlertAction *action) {
+        (void)action;
+        if (scoped) [picked stopAccessingSecurityScopedResource];
+        done();
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@(TOTK_UI("导入", "Import")) style:UIAlertActionStyleDefault
+                                            handler:^(UIAlertAction *action) {
+        (void)action;
+        [self copyImport:source from:picked scoped:scoped completion:done];
+    }]];
+    [host presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)copyImport:(NSURL *)source from:(NSURL *)picked scoped:(BOOL)scoped completion:(void (^)(void))done {
+    dispatch_async(queue, ^{
+        self->stopping = 0;
+        NSFileManager *files = NSFileManager.defaultManager;
+        /* 1. Keep what is going to be replaced; if that copy fails, stop while the live save is still in place. */
+        NSURL *keep = [[self documents] URLByAppendingPathComponent:kBeforeImport isDirectory:YES];
+        [files removeItemAtURL:keep error:nil];
+        NSUInteger kept = 0;
+        for (NSUInteger i = 0; i < sizeof kDirectories / sizeof *kDirectories; i++)
+            kept += [self mirror:[self localDirectory:i] to:[keep URLByAppendingPathComponent:kDirectories[i] isDirectory:YES] overwrite:YES];
+        if (!kept) {
+            BOOL live = NO;
+            for (NSUInteger i = 0; i < sizeof kDirectories / sizeof *kDirectories; i++)
+                live = live || [[files contentsOfDirectoryAtPath:[[self localDirectory:i] path] error:nil] count] > 0;
+            if (live) {
+                fprintf(stderr, "[totk-save] import aborted: the current save could not be kept\n");
+                if (scoped) [picked stopAccessingSecurityScopedResource];
+                dispatch_async(dispatch_get_main_queue(), done);
+                return;
+            }
+        }
+        /* 2. Copy each folder beside the live one, then swap: the live save is only removed once the import is complete. */
+        NSUInteger copied = 0;
+        for (NSUInteger i = 0; i < sizeof kDirectories / sizeof *kDirectories; i++) {
+            NSURL *from = [source URLByAppendingPathComponent:kDirectories[i] isDirectory:YES];
+            if (![files fileExistsAtPath:from.path]) continue;
+            NSURL *to = [self localDirectory:i];
+            NSURL *temporary = [to URLByAppendingPathExtension:@"import-tmp"];
+            [files removeItemAtURL:temporary error:nil];
+            NSUInteger n = [self mirror:from to:temporary overwrite:YES];
+            if (!n) {
+                fprintf(stderr, "[totk-save] import of %s failed; the live save is untouched\n", kDirectories[i].UTF8String);
+                [files removeItemAtURL:temporary error:nil];
+                continue;
+            }
+            [files removeItemAtURL:to error:nil];
+            NSError *error = nil;
+            if (![files moveItemAtURL:temporary toURL:to error:&error]) {
+                fprintf(stderr, "[totk-save] import swap failed: %s (the copy stays in %s)\n",
+                        error.localizedDescription.UTF8String, temporary.path.UTF8String);
+                if (scoped) [picked stopAccessingSecurityScopedResource];
+                dispatch_async(dispatch_get_main_queue(), done);
+                return;
+            }
+            copied += n;
+        }
+        if (scoped) [picked stopAccessingSecurityScopedResource];
+        fprintf(stderr, "[totk-save] imported %lu entries from %s; the replaced save is in %s\n",
+                (unsigned long)copied, picked.path.UTF8String, keep.path.UTF8String);
+        dispatch_async(dispatch_get_main_queue(), done);
+    });
 }
 
 - (NSURL *)documents {
