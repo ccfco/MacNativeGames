@@ -16,6 +16,11 @@ TOTK = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(TOTK/'scripts'))
 from shader_list import ShaderList   # noqa: E402
 SHADER_LIST = TOTK/'assets/shader_list.tsv'
+CONTRIBUTION = Path(os.environ.get('MNG_CONTRIB_FOLDER') or TOTK.parent.parent/'shader-list-contribution')
+CONTRIBUTION_HEADER = (
+    '# Shaders and render pipelines this Mac and its iPhones / iPads met that the shared shader list does not have yet\n'
+    '# (docs/shader-list.md). Only shader keys, bind states and pipeline descriptors: no game data or personal information.\n'
+    '# Send it in a GitHub issue: https://github.com/ly05010419/MacNativeGames/issues/new?template=shader-list.yml\n')
 VARIANT = re.compile(r'^([0-9a-f]{64})-[0-9a-f]{12}$')
 HEX = re.compile(r'^(?:[0-9a-f]{2})+$')
 MAX_CODE = 16 << 20   # the runtime's own limit on a shader's code area
@@ -32,6 +37,11 @@ def translator_service(tree):
         if os.access(path, os.X_OK): return path
     raise RuntimeError('missing shader translator; looked for ' + ', '.join(str(p) for p in candidates))
 
+
+
+def contribution_file():
+    CONTRIBUTION.mkdir(parents=True, exist_ok=True)
+    return CONTRIBUTION/'shader-list-contribution.txt'
 
 
 def chain():
@@ -141,6 +151,9 @@ def main():
     ap.add_argument('--bundle-id', default=os.environ.get('TOTK_BUNDLE_ID', 'org.macnativegames.totk'))
     ap.add_argument('--requests', type=Path, help='use requests already copied from the device instead of pulling them')
     ap.add_argument('--no-push', action='store_true', help='translate and build the pack, but do not send it')
+    ap.add_argument('--update-list', action='store_true',
+                    help='also write the new variants into games/totk/assets/shader_list.tsv (the shipped list); '
+                         'by default they only go to the contribution file')
     ap.add_argument('--with-done', action='store_true', help='also rebuild the variants filled before (shader-requests/done),'
                     ' e.g. after a change of the compile options; the game replaces their libraries')
     args = ap.parse_args()
@@ -180,10 +193,21 @@ def main():
         if not variants: raise RuntimeError('no variant could be translated')
         name = time.strftime('%Y%m%d-%H%M%S'); pack = work/name; pack.mkdir()
         count = build_pack(pack, out, variants, ch, env)
-        # What this device needed goes into the one shared list, so every later build carries it (docs/shader-list.md).
+        # What this device needed leaves the repository alone by default: the rows go to the contribution file the
+        # project already submits through a GitHub issue (shader_contrib_watch.py). --update-list also writes the
+        # shipped list, which every build reads, for someone who wants the next local build to carry the variant.
         # The pack's index rows are written by build_pack, so the list is merged from the pack after it is built.
-        shared = ShaderList.load(SHADER_LIST); before = len(shared.variants); shared.add_cache(pack); shared.save(SHADER_LIST)
-        print(f'shared shader list: {len(shared.variants) - before} new variants ({SHADER_LIST}; send them in a pull request)')
+        shared = ShaderList.load(SHADER_LIST); before = set(shared.variants); shared.add_cache(pack)
+        new = sorted(shared.variants - before)
+        if new:
+            contrib = contribution_file()
+            header = '' if contrib.exists() else CONTRIBUTION_HEADER
+            with contrib.open('a') as f:
+                f.write(header + ''.join(f'V\t{key}\t{deps}\n' for key, deps in new))
+            print(f'contribution file: {len(new)} new variants ({contrib}; shader_contrib_watch.py sends it in an issue)')
+        if args.update_list:
+            shared.save(SHADER_LIST)
+            print(f'shared shader list: {len(new)} new variants ({SHADER_LIST})')
         print(f'pack {name}: {len(variants)} variants, {count} files' + (f', {len(failed)} failed' if failed else ''))
         if args.no_push:
             keep = tree/'build/shader-fill'/name; keep.parent.mkdir(parents=True, exist_ok=True); shutil.move(str(pack), keep)
