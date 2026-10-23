@@ -39,5 +39,18 @@ class TranslatorServiceTests(unittest.TestCase):
                 fill_shaders.TOTK = old
 
 
+class ContributionTests(unittest.TestCase):
+    def test_rerunning_writes_each_row_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            contrib = Path(tmp) / 'shader-list-contribution.txt'
+            rows = ['V\t' + 'a' * 64 + '-0123456789ab' + '\t{}', 'V\t' + 'b' * 64 + '-0123456789ab' + '\t{}']
+            self.assertEqual(fill_shaders.append_contribution(contrib, rows), 2)
+            self.assertEqual(fill_shaders.append_contribution(contrib, rows + rows[1:]), 0)
+            fill_shaders.append_contribution(contrib, rows + ['V\t' + 'c' * 64 + '-0123456789ab' + '\t{}'])
+            lines = contrib.read_text().splitlines()
+            self.assertEqual([l for l in lines if l.startswith('V\t')], rows + ['V\t' + 'c' * 64 + '-0123456789ab' + '\t{}'])
+            self.assertEqual(sum(1 for l in lines if l.startswith('#')), 3)   # the header, written once
+
+
 if __name__ == '__main__':
     unittest.main()

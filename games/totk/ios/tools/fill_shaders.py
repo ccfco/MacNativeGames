@@ -44,6 +44,21 @@ def contribution_file():
     return CONTRIBUTION/'shader-list-contribution.txt'
 
 
+def append_contribution(contrib, rows):
+    """Append the rows the contribution file does not hold yet; returns how many were written.
+
+    Rerunning for the same requests (--with-done rebuilds them on purpose) must not grow the file again: it is what
+    players attach to an issue, and the row text is what shader_contrib_watch.merge_rows compares.
+    """
+    exists = contrib.exists()
+    have = set(contrib.read_text(errors='replace').splitlines()) if exists else set()
+    fresh = [row for row in dict.fromkeys(rows) if row not in have]
+    if fresh:
+        with contrib.open('a') as f:
+            f.write(('' if exists else CONTRIBUTION_HEADER) + ''.join(f'{row}\n' for row in fresh))
+    return len(fresh)
+
+
 def chain():
     for line in (TOTK/'third_party/d2r_gfx/gfx/nvn/dmsh_chain.h').read_text().splitlines():
         if line.startswith('#define DMSH_CHAIN'): return line.split('"')[1]
@@ -200,11 +215,9 @@ def main():
         shared = ShaderList.load(SHADER_LIST); before = set(shared.variants); shared.add_cache(pack)
         new = sorted(shared.variants - before)
         if new:
-            contrib = contribution_file()
-            header = '' if contrib.exists() else CONTRIBUTION_HEADER
-            with contrib.open('a') as f:
-                f.write(header + ''.join(f'V\t{key}\t{deps}\n' for key, deps in new))
-            print(f'contribution file: {len(new)} new variants ({contrib}; shader_contrib_watch.py sends it in an issue)')
+            added = append_contribution(contribution_file(), [f'V\t{key}\t{deps}' for key, deps in new])
+            if added:
+                print(f'contribution file: {added} new variants ({CONTRIBUTION}; shader_contrib_watch.py sends it in an issue)')
         if args.update_list:
             shared.save(SHADER_LIST)
             print(f'shared shader list: {len(new)} new variants ({SHADER_LIST})')
