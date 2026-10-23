@@ -43,22 +43,29 @@ def load_profile(profile: Path) -> dict:
     return plistlib.loads(raw)
 
 
-def identity_sha1(identity: str) -> str | None:
-    """The SHA-1 of a codesigning identity's certificate, as `security find-identity -p codesigning` lists it."""
-    listing = subprocess.run(['security', 'find-identity', '-v', '-p', 'codesigning'],
-                             capture_output=True, text=True).stdout
-    for line in listing.splitlines():
-        m = re.match(r'\s*\d+\)\s+([0-9A-Fa-f]{40})\s+"(.+)"', line)
-        if m and m.group(2) == identity:
-            return m.group(1).lower()
+def identity_sha1(identity: str, keychain: str = '') -> str | None:
+    """The SHA-1 of a codesigning identity's certificate, as `security find-identity -p codesigning` lists it.
+    With --keychain the identity may live only there (a keychain made for signing is often not in the search list),
+    so that keychain is searched first and the search list is still tried as a fallback. find-identity takes keychains
+    as positional arguments, and listing one searches only that keychain."""
+    searches = [[keychain]] if keychain else []
+    searches.append([])
+    for extra in searches:
+        listing = subprocess.run(['security', 'find-identity', '-v', '-p', 'codesigning', *extra],
+                                 capture_output=True, text=True).stdout
+        for line in listing.splitlines():
+            m = re.match(r'\s*\d+\)\s+([0-9A-Fa-f]{40})\s+"(.+)"', line)
+            if m and m.group(2) == identity:
+                return m.group(1).lower()
     return None
 
 
-def check_identity_allowed(profile: dict, identity: str):
+def check_identity_allowed(profile: dict, identity: str, keychain: str = ''):
     """A profile authorizes specific developer certificates; signing with another one produces an IPA iOS refuses."""
-    wanted = identity_sha1(identity)
+    wanted = identity_sha1(identity, keychain)
     if wanted is None:
-        sys.exit(f'no codesigning identity named {identity!r} in the keychain search list')
+        where = f'{keychain} or the keychain search list' if keychain else 'the keychain search list'
+        sys.exit(f'no codesigning identity named {identity!r} in {where}')
     allowed = {hashlib.sha1(bytes(c)).hexdigest() for c in profile.get('DeveloperCertificates') or []}
     if allowed and wanted not in allowed:
         sys.exit(f'the profile does not authorize {identity!r} (SHA-1 {wanted}); it lists '
@@ -98,7 +105,7 @@ def main():
         sys.exit('the profile has no application-identifier')
     wanted_bundle = app_id.split('.', 1)[1]
     wildcard = wanted_bundle.endswith('*')
-    check_identity_allowed(profile, a.identity)
+    check_identity_allowed(profile, a.identity, a.keychain)
     if not ent.get('com.apple.developer.kernel.increased-memory-limit'):
         # build_ipa.py signs the executable ad hoc with this entitlement; --force replaces the signature's
         # entitlements with the profile's. Without it the game's 3.2 GiB pool falls back to the iOS default limit.
