@@ -1742,7 +1742,8 @@ def parse_args(argv):
                          'the build leaves the folder alone and prints the two commands that fill it by hand')
     ap.add_argument('--shader-cache', type=Path, help=argparse.SUPPRESS)   # removed: the seed comes from the game data and the shared list
     ap.add_argument('--no-shader-reminder', action='store_true', help='iOS: do not install the Mac agent that asks, while an iPhone / iPad with the game is connected, to send the shaders the shared list lacks')
-    ap.add_argument('--app-name', default=APP_NAME, help=f'iOS: the name on the home screen (default: {APP_NAME})')
+    ap.add_argument('--app-name', default=APP_NAME, help=f'the macOS app name, also the default output file\'s (default: {APP_NAME})')
+    ap.add_argument('--ios-app-name', default=IOS_APP_NAME, help=f'iOS: the name on the home screen (default: {IOS_APP_NAME}, short enough that the home screen does not cut it off)')
     ap.add_argument('--bundle-id', default=BUNDLE_ID, help=f'iOS: the app bundle ID; must match the signing profile (default: {BUNDLE_ID})')
     fonts = ap.add_mutually_exclusive_group()
     fonts.add_argument('--firmware', type=Path, help='unpacked firmware NCA directory providing the six expected shared fonts (needed for NSP unless --shared-fonts or valid cached fonts are available; Breath of the Wild 1.9.0 too)')
@@ -1914,7 +1915,7 @@ def main(argv):
     say(f'4/4 app: assembling {out}')
     if args.platform=='ios':
         ipa_args=[py, 'ios/tools/build_ipa.py', '--tree', tree, '--out', out, '--version', version,
-                  '--logs', logs, '--app-name', IOS_APP_NAME, '--bundle-id', BUNDLE_ID,
+                  '--logs', logs, '--app-name', args.ios_app_name, '--bundle-id', BUNDLE_ID,
                   *(['--image-outside'] if args.ios_game_data == 'documents' else [])]
         heapdef = mod_heapdef(mod)   # the baked 2K overlays keep the mod's heap sizes
         if heapdef: ipa_args += ['--heapdef', str(heapdef)]
