@@ -23,6 +23,7 @@ Restore the search list afterwards if the keychain was only for this build. --ke
 that keychain, so either leave it out (the search list above) or import the Apple root into it as well.
 """
 import argparse
+import datetime
 import hashlib
 import plistlib
 import re
@@ -72,6 +73,17 @@ def check_identity_allowed(profile: dict, identity: str, keychain: str = ''):
                  + ', '.join(sorted(allowed)))
 
 
+def check_profile_expiry(profile: dict):
+    """An expired profile no longer authorizes installation; the IPA would sign cleanly and refuse to install."""
+    expires = profile.get('ExpirationDate')
+    if not isinstance(expires, datetime.datetime):
+        return
+    if expires.tzinfo is None:   # profile plist dates are UTC without a zone
+        expires = expires.replace(tzinfo=datetime.timezone.utc)
+    if expires <= datetime.datetime.now(datetime.timezone.utc):
+        sys.exit(f'the profile expired on {expires:%Y-%m-%d %H:%M} UTC; get a fresh one')
+
+
 def sign_item(path: Path, identity: str, keychain: str, entitlements: Path | None = None):
     args = ['codesign', '--force', '--sign', identity, '--timestamp=none', '--generate-entitlement-der']
     if keychain:
@@ -99,6 +111,7 @@ def main():
     if not a.profile.is_file():
         sys.exit(f'missing profile: {a.profile}')
     profile = load_profile(a.profile)
+    check_profile_expiry(profile)
     ent = profile.get('Entitlements', {})
     app_id = ent.get('application-identifier', '')
     if '.' not in app_id:
