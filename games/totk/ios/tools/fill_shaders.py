@@ -166,6 +166,7 @@ def main():
             if not args.requests and not done.is_dir():
                 r = devicectl(env, args, 'from', 'Documents/shader-requests/done', done)
                 if r.returncode and not missing_on_device(r):
+                    incomplete = True   # a disconnect here must not read as "nothing to do"
                     print(f"pull of done requests was incomplete: {r.stderr.strip().splitlines()[-1:]}")
             seen = {rq['variant'] for rq in rqs}
             rqs += [rq for rq in load_requests(done) if rq['variant'] not in seen]

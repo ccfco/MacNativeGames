@@ -39,7 +39,7 @@ for attempt in 1 2 3; do
     sleep 1
 done
 [ -n "$APPS" ] || fail "iPad 返回了空的 App 列表；请解锁 iPad 后重试"
-if ! printf '%s\n' "$APPS" | grep -Fq -- "$BUNDLE"; then
+if ! grep -Fq -- "$BUNDLE" <<< "$APPS"; then   # here-string: a pipe would let grep -q exit early and SIGPIPE the producer (pipefail)
     fail "iPad 上没有安装 $BUNDLE"
 fi
 printf '  设备在线，App 已安装\n  如果接下来的读取失败，请解锁 iPad 后重试\n'
