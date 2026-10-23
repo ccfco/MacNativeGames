@@ -10,9 +10,9 @@
 			<key>Type</key>
 			<string>PSGroupSpecifier</string>
 			<key>Title</key>
-			<string>画面 · Display</string>
+			<string>画面 · Picture</string>
 			<key>FooterText</key>
-			<string>先选画质模式，场景分辨率和帧率再按需调整。想更稳：1080p + 1280x720 + 30 帧补到 60（或 60 帧）；想更清晰：MetalFX 2K + 1600x900 + 60 帧。重启游戏后生效 · choose a picture mode first; scene resolution and frame rate are separate. Steadiest: 1080p + 1280x720 + 30 interpolated to 60 (or 60 fps); sharpest: MetalFX 2K + 1600x900 + 60 fps. Takes effect after relaunching</string>
+			<string>画质模式决定画布大小，以及画布要不要由 MetalFX 放大到面板；场景分辨率只影响 3D 世界，与画质模式独立。超分与抗锯齿在下一组。重启游戏后生效 · the picture mode sets the canvas and whether MetalFX upscales it to the panel; the scene resolution affects the 3D world only. Upscaling and anti-aliasing are in the next group. Takes effect after relaunching</string>
 		</dict>
 		<dict>
 			<key>Type</key>
@@ -32,25 +32,13 @@
 			</array>
 			<key>Titles</key>
 			<array>
-				<string>MetalFX 2K（文字最清楚）· MetalFX 2K (sharpest text)</string>
-				<string>原生 2K（最清晰，最热）· Native 2K (sharpest, hottest)</string>
-				<string>1080p（更凉）· 1080p (cooler)</string>
+				<string>MetalFX 2K（1080p 画布 + 输出超分，文字最清楚）· MetalFX 2K (1080p canvas + output upscaling, sharpest text)</string>
+				<string>原生 2K（烘焙画布，最清晰也最热）· Native 2K (baked canvas, sharpest and hottest)</string>
+				<string>1080p（画布原生，不做输出超分，更凉）· 1080p (native canvas, no output upscaling, cooler)</string>
 				<string>720p（默认，最省电）· 720p (default, lowest power)</string>
 			</array>
 			<key>FooterText</key>
-			<string>MetalFX 2K：1080p 画布用场景和输出两段 MetalFX 放大到面板，文字更清楚；1080p：约 1919x1323 显示缓冲，不做输出 MetalFX，更凉；原生 2K：使用构建时烘焙的画布（默认构建面向 11 英寸 M5 iPad，2420x1668），文字真正原生，3D 仍按场景分辨率渲染，发热最高，其他面板自动回退；720p：更小缓冲，最省电。 · MetalFX 2K: a 1080p canvas upscaled to the panel by both MetalFX stages for clearer text; 1080p: about a 1919x1323 drawable with no output MetalFX, cooler; Native 2K: the canvas baked into this build (the default targets the 11-inch M5 iPad, 2420x1668) for native text (3D stays at the scene resolution; hottest; other panels fall back); 720p: a smaller drawable, lowest power.</string>
-		</dict>
-		<dict>
-			<key>Type</key>
-			<string>PSToggleSwitchSpecifier</string>
-			<key>Key</key>
-			<string>TOTK_MFX_UPSCALE</string>
-			<key>Title</key>
-			<string>场景超分 · Scene upscaling</string>
-			<key>DefaultValue</key>
-			<true/>
-			<key>FooterText</key>
-			<string>用 MetalFX 把 3D 场景放大到画布：画面更锐，代价是少量 GPU；关掉能再省一点。原生 2K 下由游戏自己的缩放填充画布，此开关不生效。重启游戏后生效 · MetalFX upscales the 3D scene into the canvas: sharper for a little GPU; off saves a little more. With Native 2K the game's own scaler fills the canvas, so the switch does nothing. Takes effect after relaunching</string>
+			<string>MetalFX 2K：1080p 画布，最后由 MetalFX 放大到面板，文字更清楚；1080p：约 1919x1323 显示缓冲，不做输出超分，更凉；原生 2K：使用构建时烘焙的画布（默认构建面向 11 英寸 M5 iPad，2420x1668），文字真正原生，3D 仍按场景分辨率渲染，发热最高，其他面板自动回退；720p：更小缓冲，最省电。四个档位都不改变 3D 场景的渲染尺寸。 · MetalFX 2K: a 1080p canvas that MetalFX upscales to the panel for clearer text; 1080p: about a 1919x1323 drawable with no output upscaling, cooler; Native 2K: the canvas baked into this build (default: the 11-inch M5 iPad, 2420x1668) for native text (3D stays at the scene resolution; hottest; other panels fall back); 720p: a smaller drawable, lowest power. None of them changes the 3D scene's render size.</string>
 		</dict>
 		<dict>
 			<key>Type</key>
@@ -82,42 +70,6 @@
 			<key>Type</key>
 			<string>PSRadioGroupSpecifier</string>
 			<key>Key</key>
-			<string>TOTK_FPS_CAP</string>
-			<key>Title</key>
-			<string>帧率上限 · Frame rate cap</string>
-			<key>DefaultValue</key>
-			<string>60</string>
-			<key>Values</key>
-			<array>
-				<string>30</string>
-				<string>60</string>
-				<string>120</string>
-			</array>
-			<key>Titles</key>
-			<array>
-				<string>30 帧（省电）· 30 fps</string>
-				<string>60 帧（推荐）· 60 fps</string>
-				<string>120 帧（最热）· 120 fps</string>
-			</array>
-			<key>FooterText</key>
-			<string>30 最省电但最不流畅；60 推荐；120 最顺滑也最热。120 需要 120 Hz 面板，60 Hz 设备自动回退到 60。重启游戏后生效 · 30 saves power but is the least smooth; 60 is recommended; 120 is the smoothest and hottest. 120 needs a 120 Hz panel; a 60 Hz device falls back to 60. Takes effect after relaunching</string>
-		</dict>
-		<dict>
-			<key>Type</key>
-			<string>PSToggleSwitchSpecifier</string>
-			<key>Key</key>
-			<string>TOTK_MFX_INTERP</string>
-			<key>Title</key>
-			<string>MetalFX 补帧 · MetalFX interpolation</string>
-			<key>DefaultValue</key>
-			<false/>
-			<key>FooterText</key>
-			<string>开启后：30 帧补到 60，60 帧补到 120；120 帧本身没有余量，补帧不生效。约多一帧延迟，快速移动可能有伪影（实验）。重启游戏后生效 · on: 30→60, 60→120; 120 has no headroom, so it does nothing there. About one frame of latency and possible motion artifacts (experimental). Takes effect after relaunching</string>
-		</dict>
-		<dict>
-			<key>Type</key>
-			<string>PSRadioGroupSpecifier</string>
-			<key>Key</key>
 			<string>TOTK_ASPECT</string>
 			<key>Title</key>
 			<string>画面比例 · Aspect ratio</string>
@@ -138,6 +90,26 @@
 		</dict>
 		<dict>
 			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+			<key>Title</key>
+			<string>MetalFX · 超分与抗锯齿</string>
+			<key>FooterText</key>
+			<string>管线：场景按「场景分辨率」渲染 → 场景超分 → 画布 → 输出超分（由画质模式决定）→ 面板。两段超分都是 MetalFX 空间放大，不增加帧延迟；边缘平滑是 MetalFX 的时间抗锯齿。重启游戏后生效 · pipeline: the scene renders at the scene resolution → scene upscaling → canvas → output upscaling (set by the picture mode) → panel. Both stages are MetalFX spatial scaling with no added latency; edge smoothing is MetalFX temporal anti-aliasing. Takes effect after relaunching</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSToggleSwitchSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_MFX_UPSCALE</string>
+			<key>Title</key>
+			<string>场景超分 · Scene upscaling</string>
+			<key>DefaultValue</key>
+			<true/>
+			<key>FooterText</key>
+			<string>把 3D 场景用 MetalFX 放大到画布（场景 → 画布这一段）：画面更锐，实测 GPU 代价不到 0.2 ms；关掉画面会明显变软。原生 2K 下由游戏自己的缩放填充画布，此开关不生效。重启游戏后生效 · MetalFX upscales the 3D scene into the canvas (the scene → canvas stage): sharper for under 0.2 ms of GPU in our measurements; off is visibly softer. With Native 2K the game's own scaler fills the canvas, so the switch does nothing. Takes effect after relaunching</string>
+		</dict>
+		<dict>
+			<key>Type</key>
 			<string>PSToggleSwitchSpecifier</string>
 			<key>Key</key>
 			<string>TOTK_TAA</string>
@@ -146,7 +118,51 @@
 			<key>DefaultValue</key>
 			<false/>
 			<key>FooterText</key>
-			<string>对 3D 画面做时间性抗锯齿，边缘更稳；可能有轻微拖影，默认关闭。重启游戏后生效 · temporal anti-aliasing of the 3D scene; slight ghosting is possible. Off by default; takes effect after relaunching</string>
+			<string>对 3D 画面做时间性抗锯齿，边缘更稳；可能有轻微拖影，默认关闭。重启游戏后生效 · MetalFX temporal anti-aliasing of the 3D scene; slight ghosting is possible. Off by default; takes effect after relaunching</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+			<key>Title</key>
+			<string>帧率 · Frame rate</string>
+			<key>FooterText</key>
+			<string>上限决定游戏每秒出多少帧；补帧由 MetalFX 在相邻两帧之间生成一帧。重启游戏后生效 · the cap sets how many frames the game renders per second; interpolation has MetalFX generate a frame between two. Takes effect after relaunching</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSRadioGroupSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_FPS_CAP</string>
+			<key>Title</key>
+			<string>帧率上限 · Frame rate cap</string>
+			<key>DefaultValue</key>
+			<string>60</string>
+			<key>Values</key>
+			<array>
+				<string>30</string>
+				<string>60</string>
+				<string>120</string>
+			</array>
+			<key>Titles</key>
+			<array>
+				<string>30 帧（省电，最稳）· 30 fps (coolest, steadiest)</string>
+				<string>60 帧（推荐）· 60 fps</string>
+				<string>120 帧（最热）· 120 fps</string>
+			</array>
+			<key>FooterText</key>
+			<string>30 最省电也最稳，长时间不变；60 推荐，发热后可能临时降到 30，冷却后自行回到 60；120 最顺滑也最热，需要 120 Hz 面板，60 Hz 设备自动回退到 60。重启游戏后生效 · 30 is the coolest and holds steady over time; 60 is recommended — after the SoC heats up the game may drop to 30 for a while and return to 60 once it cools; 120 is the smoothest and hottest and needs a 120 Hz panel (a 60 Hz device falls back to 60). Takes effect after relaunching</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSToggleSwitchSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_MFX_INTERP</string>
+			<key>Title</key>
+			<string>MetalFX 补帧 · MetalFX interpolation</string>
+			<key>DefaultValue</key>
+			<false/>
+			<key>FooterText</key>
+			<string>开启后：30 帧补到 60，60 帧补到 120；120 帧本身没有余量，补帧不生效。约多一帧延迟，快速移动可能有伪影（实验）。重启游戏后生效 · on: 30→60, 60→120; 120 has no headroom, so it does nothing there. About one frame of latency and possible motion artifacts (experimental). Takes effect after relaunching</string>
 		</dict>
 		<dict>
 			<key>Type</key>
