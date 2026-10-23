@@ -251,7 +251,7 @@ static void apply_settings(void) {
        the environment alone, so use the effective value and only overwrite an invalid one. */
     NSDictionary *scene_row = pref_row(root, @"TOTK_RENDER_RES");
     NSArray *scene_values = scene_row[@"Values"] ?: @[];
-    NSString *fallback = scene_row[@"DefaultValue"] ?: @"1600x900";
+    NSString *fallback = scene_row[@"DefaultValue"] ?: @"960x540";
     NSString *storedScene = [d stringForKey:@"TOTK_RENDER_RES"];
     if (!storedScene.length) storedScene = fallback;
     const char *from_env = getenv("TOTK_RENDER_RES");

@@ -31,5 +31,8 @@ int totk_frame_env_build(const char *cap, int interpolate, totk_frame_env *out) 
     return 1;
 }
 
-const char *totk_picture_mode_default(void) { return "mfx"; }
+/* The pane's default: 720p with the 960x540 scene is the only combination that keeps 60 fps for a while on an iPad
+   before the SoC throttles, and it is the coolest (measured 2026-10-23: GPU 12.9 ms at 960x540 against 26 ms at
+   1280x720 on the same draw count). Must match Root.plist's DefaultValue; tests/test_ios_settings.py checks that. */
+const char *totk_picture_mode_default(void) { return "720"; }
 const char *totk_frame_cap_default(void) { return "60"; }

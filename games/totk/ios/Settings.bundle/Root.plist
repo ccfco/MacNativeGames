@@ -22,7 +22,7 @@
 			<key>Title</key>
 			<string>画质模式 · Picture mode</string>
 			<key>DefaultValue</key>
-			<string>mfx</string>
+			<string>720</string>
 			<key>Values</key>
 			<array>
 				<string>mfx</string>
@@ -48,7 +48,7 @@
 			<key>Title</key>
 			<string>场景分辨率 · Scene resolution</string>
 			<key>DefaultValue</key>
-			<string>1600x900</string>
+			<string>960x540</string>
 			<key>Values</key>
 			<array>
 				<string>1600x900</string>

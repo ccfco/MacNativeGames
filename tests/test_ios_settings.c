@@ -81,8 +81,11 @@ int main(int argc, char **argv) {
     if (totk_frame_env_build("90", 0, &f) || totk_frame_env_build(NULL, 0, &f) || strcmp(f.present_hz, "keep")) {
         failures++; fprintf(stderr, "unknown frame caps must be rejected without touching the result\n");
     }
-    if (strcmp(totk_picture_mode_default(), "mfx") || strcmp(totk_frame_cap_default(), "60")) {
-        failures++; fprintf(stderr, "defaults are %s/%s, want mfx/60\n", totk_picture_mode_default(), totk_frame_cap_default());
+    /* The values themselves belong to Root.plist (test_ios_settings.py compares them); here only that the defaults are
+       modes the pane can actually produce. */
+    if (!picture_accepts(totk_picture_mode_default()) || !frame_cap_accepts(totk_frame_cap_default())) {
+        failures++; fprintf(stderr, "defaults %s/%s are not pane values\n",
+                            totk_picture_mode_default(), totk_frame_cap_default());
     }
     if (failures) return 1;
     puts("ios settings ok");
