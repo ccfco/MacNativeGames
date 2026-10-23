@@ -335,6 +335,11 @@ static NSMutableDictionary *variant_request(NSString *shader, int stage, const u
     [rq addEntriesFromDictionary:answers];
     if (local) rq[@"local"] = local;
     rq[@"depth_minus_w"] = totk_depth_near_minus_w() ? @YES : @NO;   // nvnDeviceSetDepthMode: NEAR_IS_MINUS_W needs the GL -> Metal clip-z conversion in every vertex shader
+    /* A fragment shader's early fragment tests: control byte +0x718 of the 0x880-byte sections (the NVN driver reads it as
+       a fragment flag and the Switch tests depth before the shader). Breath of the Wild's shorter sections (the size word
+       at +0x20 between 0x7cc and 0x880, as for the key) are not read. Same rule as prepare_shader_seed.py. */
+    { uint32_t size; memcpy(&size, control + 0x20, 4);
+      if (stage == 1 && !(size >= 0x7cc && size < 0x880) && (control[0x718] & 1)) rq[@"early_fragment_tests"] = @YES; }
     if (no_translator()) rq[@"code_hex"] = hex(code + skip, c1t - skip);
     return rq;
 }

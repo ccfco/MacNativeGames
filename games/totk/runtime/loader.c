@@ -198,9 +198,11 @@ static void map_module(Module *m,const char *dir) {
  make_hash(m);
  fprintf(stderr,"[totk] mapped %s size=%zu symbols=%u\n",m->name,m->size,m->nsym);
 }
-/* TOTK_EXPORT_IOS=<dir>: after the game patches, write each module's text [0, page_up(TEXT_END)) for ios/tools/gen_embed.py.
-   Relocations never reach the text (they start at DATA_OFF), so the exported bytes differ from the verified image only at
-   the patch sites; the count is printed and checked by the generator. */
+/* TOTK_EXPORT_IOS=<dir>: after the game patches, write each module's text [0, page_up(TEXT_END)) and patch area
+   [PATCH_OFF, page_up(file size)) for ios/tools/gen_embed.py (Breath of the Wild's exclusive-acquire patch also changes the
+   rewriter's patch area; Tears of the Kingdom's leave it as it is). Relocations never reach either (they start at
+   DATA_OFF, below PATCH_OFF), so the exported bytes differ from the verified image only at the patch sites; the counts
+   are printed. */
 static void export_ios_text(const char *rewritten,const char *out) {
  for(unsigned i=0;i<NM;i++){Module *m=&modules[i];char path[4096];size_t n=page_up(m->text_end);
   need(snprintf(path,sizeof path,"%s/%s.patched.bin",rewritten,m->name)<(int)sizeof path,"image path");
@@ -208,7 +210,14 @@ static void export_ios_text(const char *rewritten,const char *out) {
   unsigned diff=0;for(size_t k=0;k<n;k+=4)if(memcmp(orig+k,m->base+k,4))diff++;free(orig);
   need(snprintf(path,sizeof path,"%s/%s.x0.bin",out,m->name)<(int)sizeof path,"export path");
   f=fopen(path,"wb");need(f&&fwrite(m->base,1,n,f)==n&&fclose(f)==0,"write exported text");
-  printf("%s text_bytes=%zu patched_words=%u\n",m->name,n,diff);}
+  size_t p0=m->patch_off,p1=page_up(m->file_size);need(p0<=p1&&p1<=m->size,"patch area layout");
+  need(snprintf(path,sizeof path,"%s/%s.patched.bin",rewritten,m->name)<(int)sizeof path,"image path");
+  f=fopen(path,"rb");need(f!=NULL,"open patched module");uint8_t *img=calloc(1,p1-p0);need(img!=NULL,"patch area buffer");
+  need(fseek(f,(long)p0,SEEK_SET)==0,"seek patch area");size_t got=fread(img,1,m->file_size-p0,f);fclose(f);need(got==m->file_size-p0,"read patch area");
+  unsigned pdiff=0;for(size_t k=0;k<p1-p0;k+=4)if(memcmp(img+k,m->base+p0+k,4))pdiff++;free(img);
+  need(snprintf(path,sizeof path,"%s/%s.x1.bin",out,m->name)<(int)sizeof path,"export path");
+  f=fopen(path,"wb");need(f&&fwrite(m->base+p0,1,p1-p0,f)==p1-p0&&fclose(f)==0,"write exported patch area");
+  printf("%s text_bytes=%zu patched_words=%u patch_area_bytes=%zu patched_words=%u\n",m->name,n,diff,p1-p0,pdiff);}
 }
 #endif
 static void relocate(Module *m) {

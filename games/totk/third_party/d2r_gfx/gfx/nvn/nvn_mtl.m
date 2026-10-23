@@ -5341,12 +5341,16 @@ static NvShader *plib_take(NSString *pc, int wait) {
     pthread_mutex_unlock(&g_plib_mu);
     return sh;
 }
-/* Async shaders (Mac default, user 2026-10-21; TOTK_ASYNC_SHADERS=0 turns them off): a new shader variant or pipeline is
+/* Async shaders (off by default since 2026-10-23, TOTK_ASYNC_SHADERS=1 turns them on; Mac default 2026-10-21 to 10-23): a new shader variant or pipeline is
    prepared in the background and the draws that need it are skipped until it is ready, the way games that stream their
    content show it a few frames later, instead of stopping the frame. Work whose result outlives the draw is never
    skipped: compute, draws without a colour output (depth and shadow passes) and programs that store to memory or stream
    out (sph_keeps_memory). Those wait for the background job instead (prog_resolve). Off with the experimental TBDR pass
-   rewriting (DM_NVN_TBDR=1): its load / store planning assumes every draw it planned is drawn. */
+   rewriting (DM_NVN_TBDR=1): its load / store planning assumes every draw it planned is drawn.
+   Default off (user 2026-10-23): the app now carries every shader translated and compiled and the warm-up fills the
+   pipeline archive before the title, so play meets almost no new shader and one or two new pipelines a session, while a
+   skipped draw stays missing until its pipeline is ready (behind a queue of predicted pipelines that took long: the
+   Great Sky Island water's magenta lasted much longer with it on). */
 static int async_shaders(void) {
 #if TARGET_OS_IPHONE
     return 0;   // no translator on the device: missing variants are skipped anyway
@@ -5354,7 +5358,7 @@ static int async_shaders(void) {
     static int on = -1;
     if (on < 0) {
         const char *e = getenv("TOTK_ASYNC_SHADERS");
-        on = !(e && !strcmp(e, "0")) && totk_rt_can_translate() && !tbdr_on();
+        on = e && !strcmp(e, "1") && totk_rt_can_translate() && !tbdr_on();
         if (on) totk_rt_set_ready_hook(async_ready);
         MLOG("[async-shaders] %s", on ? "on: new shaders and pipelines are prepared in the background" : "off");
     }
@@ -10554,7 +10558,8 @@ static int skv_check(const void *pr, const p_draw *dw, const p_draw_idx *di) {
       int st_ok = !S.ds.st || ((S.ds.fail_f == keep && S.ds.zfail_f == keep && S.ds.fail_b == keep && S.ds.zfail_b == keep) || (!S.st_wmask[0] && !S.st_wmask[1]));
       if (!df_ok || !st_ok) return 0;
       /* shader side effects (stores to storage buffers / images in the vertex or fragment stage) happen whether or not a
-         sample passes (no shader declares early_fragment_tests). rw comes from the MSL's stores (refl_mark_stores): the
+         sample passes (unless the fragment shader declares early_fragment_tests, NVN control +0x718: then only for the
+         samples that pass, which hides nothing more). rw comes from the MSL's stores (refl_mark_stores): the
          translator flag said read-only for every shader, so the deferred-lighting quads (dbe0acd9 ...), which store a per-tile
          feedback word the next frame's class marker reads, were skipped as "0 samples" -- the title mural went dark except on
          retest frames (2026-10-16 night). Every material fragment shader stores too: an unconditional per-tile class-group flag

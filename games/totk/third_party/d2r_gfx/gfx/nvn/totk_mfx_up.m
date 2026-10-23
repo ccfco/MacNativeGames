@@ -52,7 +52,12 @@ int mfxup_enabled(void) {
     int v = atomic_load_explicit(&g_on, memory_order_relaxed);
     if (v < 0) {
         const char *e = getenv("TOTK_MFX_UPSCALE");
-        v = e ? strcmp(e, "0") != 0 : TARGET_OS_IPHONE;   // the phone renders its scene at 960x540 by default (game_patches_v143.c render_res)
+        /* Off by default everywhere. The phone renders its scene at 960x540 (game_patches_v143.c render_res,
+           game_patches_botw.c patch_phone_render) and the game's own upscale draws it into the 1280x720 canvas, for both
+           games (user 2026-10-23: "两个统一", no MetalFX on the iPhone): Tears of the Kingdom's is FSR 1 EASU, Breath of the
+           Wild's a bilinear upscale with an FXAA-style edge pass, both one cheap pass. TOTK_MFX_UPSCALE=1 (or key 3 on
+           the Mac) lets MetalFX do it. */
+        v = e ? strcmp(e, "0") != 0 : 0;
         atomic_store(&g_on, v);
         ULOG("MetalFX spatial upscaling (TOTK_MFX_UPSCALE): %s", v ? "on" : "off");
     }
