@@ -23,9 +23,11 @@ MAX_CODE = 16 << 20   # the runtime's own limit on a shader's code area
 
 def translator_service(tree):
     """The native translator: the work tree's build, else the checked-in binary for this Mac."""
-    candidates = [tree/'build/shader-service/totk_xlate',
-                  tree/f'prebuilt/macos-{platform.machine()}/totk_xlate',
-                  TOTK/f'prebuilt/macos-{platform.machine()}/totk_xlate']
+    # platform.machine() follows the interpreter: a Python running under Rosetta reports x86_64 on an arm64 Mac.
+    # The shipped binary is arm64 and the kernel runs it natively, so always consider arm64 as well.
+    arches = [platform.machine()] + (['arm64'] if platform.machine() != 'arm64' else [])
+    candidates = [tree/'build/shader-service/totk_xlate'] + \
+                 [root/f'prebuilt/macos-{arch}/totk_xlate' for arch in arches for root in (tree, TOTK)]
     for path in candidates:
         if os.access(path, os.X_OK): return path
     raise RuntimeError('missing shader translator; looked for ' + ', '.join(str(p) for p in candidates))
@@ -149,12 +151,14 @@ def main():
     work = Path(tempfile.mkdtemp(prefix='totk-shader-fill-'))
     try:
         folder = args.requests
+        incomplete = False
         if not folder:
             folder = work/'requests'
             r = devicectl(env, args, 'from', 'Documents/shader-requests', folder)
             if r.returncode:
                 if missing_on_device(r):
                     print('no shader requests from the device'); return
+                incomplete = True
                 print(f"pull was incomplete, using what arrived: {r.stderr.strip().splitlines()[-1:]}")
         rqs = load_requests(folder)
         if args.with_done:
@@ -165,7 +169,11 @@ def main():
                     print(f"pull of done requests was incomplete: {r.stderr.strip().splitlines()[-1:]}")
             seen = {rq['variant'] for rq in rqs}
             rqs += [rq for rq in load_requests(done) if rq['variant'] not in seen]
-        if not rqs: print('no shader requests from the device'); return
+        if not rqs:
+            # An incomplete pull that recovered nothing is a connection problem, not "the device has no requests":
+            # the wrapper would otherwise report success and the user would never retry.
+            if incomplete: raise RuntimeError('could not read Documents/shader-requests; unlock the device, keep it connected and retry')
+            print('no shader requests from the device'); return
         failed = translate(rqs, tree, out, ch)
         variants = sorted({rq['variant'] for rq in rqs} - failed)
         if not variants: raise RuntimeError('no variant could be translated')

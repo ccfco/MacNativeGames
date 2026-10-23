@@ -55,6 +55,8 @@ fi
 step "4/4 完成"
 if grep -q "no shader requests" "$LOG"; then
     printf '  iPad 上还没有新的缺失着色器请求；继续玩即可，以后再运行这个脚本。\n'
+elif grep -q "^not pushed" "$LOG"; then
+    printf '  补译包已生成，但没有推送到 iPad（--no-push）：%s\n' "$(sed -n 's/^not pushed; the pack is in //p' "$LOG")"
 else
     printf '  请在 iPad 上完全退出游戏，再重新打开；启动时会合并并预热新的着色器。\n'
 fi

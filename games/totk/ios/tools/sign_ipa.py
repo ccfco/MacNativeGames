@@ -23,7 +23,9 @@ Restore the search list afterwards if the keychain was only for this build. --ke
 that keychain, so either leave it out (the search list above) or import the Apple root into it as well.
 """
 import argparse
+import hashlib
 import plistlib
+import re
 import shutil
 import subprocess
 import sys
@@ -39,6 +41,28 @@ def run(args, **kwargs):
 def load_profile(profile: Path) -> dict:
     raw = subprocess.check_output(['security', 'cms', '-D', '-i', str(profile)])
     return plistlib.loads(raw)
+
+
+def identity_sha1(identity: str) -> str | None:
+    """The SHA-1 of a codesigning identity's certificate, as `security find-identity -p codesigning` lists it."""
+    listing = subprocess.run(['security', 'find-identity', '-v', '-p', 'codesigning'],
+                             capture_output=True, text=True).stdout
+    for line in listing.splitlines():
+        m = re.match(r'\s*\d+\)\s+([0-9A-Fa-f]{40})\s+"(.+)"', line)
+        if m and m.group(2) == identity:
+            return m.group(1).lower()
+    return None
+
+
+def check_identity_allowed(profile: dict, identity: str):
+    """A profile authorizes specific developer certificates; signing with another one produces an IPA iOS refuses."""
+    wanted = identity_sha1(identity)
+    if wanted is None:
+        sys.exit(f'no codesigning identity named {identity!r} in the keychain search list')
+    allowed = {hashlib.sha1(bytes(c)).hexdigest() for c in profile.get('DeveloperCertificates') or []}
+    if allowed and wanted not in allowed:
+        sys.exit(f'the profile does not authorize {identity!r} (SHA-1 {wanted}); it lists '
+                 + ', '.join(sorted(allowed)))
 
 
 def sign_item(path: Path, identity: str, keychain: str, entitlements: Path | None = None):
@@ -74,6 +98,7 @@ def main():
         sys.exit('the profile has no application-identifier')
     wanted_bundle = app_id.split('.', 1)[1]
     wildcard = wanted_bundle.endswith('*')
+    check_identity_allowed(profile, a.identity)
     if not ent.get('com.apple.developer.kernel.increased-memory-limit'):
         # build_ipa.py signs the executable ad hoc with this entitlement; --force replaces the signature's
         # entitlements with the profile's. Without it the game's 3.2 GiB pool falls back to the iOS default limit.
@@ -93,6 +118,8 @@ def main():
             if not bundle.startswith(wanted_bundle[:-1]):
                 sys.exit(f'bundle ID {bundle!r} does not match the profile {wanted_bundle!r}; build with --bundle-id '
                          f'{wanted_bundle[:-1]}<something>')
+            # The profile authorizes the pattern; the signature must carry the concrete app id, or iOS rejects it.
+            ent = dict(ent, **{'application-identifier': f'{app_id.split(".", 1)[0]}.{bundle}'})
         elif bundle != wanted_bundle:
             sys.exit(f'bundle ID {bundle!r} does not match the profile {wanted_bundle!r}; build with --bundle-id '
                      f'{wanted_bundle} or make a profile for {bundle}')
