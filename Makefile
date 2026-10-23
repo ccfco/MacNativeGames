@@ -6,7 +6,9 @@
 # The Python tests need the packages in games/totk/requirements.txt; install them once
 # (the CI does the same with pip) and this stays offline.
 
-PYTHON ?= python3
+# CI pins Python 3.14 (compression.zstd), and tests/test_mod_manifest.py skips its zstd cases without it: a gate on an
+# older interpreter can pass while CI fails, so the default is the version CI runs. Override with PYTHON=... .
+PYTHON ?= python3.14
 CC ?= cc
 
 .PHONY: check
