@@ -126,7 +126,7 @@
 			<key>Title</key>
 			<string>帧率 · Frame rate</string>
 			<key>FooterText</key>
-			<string>上限决定游戏每秒出多少帧；补帧由 MetalFX 在相邻两帧之间生成一帧。重启游戏后生效 · the cap sets how many frames the game renders per second; interpolation has MetalFX generate a frame between two. Takes effect after relaunching</string>
+			<string>上限决定游戏每秒出多少帧。热机时会先掉到 30 帧、冷却一两分钟再回到 60；想要一直稳、一直凉就选 30。重启游戏后生效 · the cap sets how many frames the game renders per second. When the SoC heats up it drops to 30 for a minute or two, then returns to 60; pick 30 to stay steady and cool. Takes effect after relaunching</string>
 		</dict>
 		<dict>
 			<key>Type</key>
@@ -151,18 +151,6 @@
 			</array>
 			<key>FooterText</key>
 			<string>30 最省电也最稳，长时间不变；60 推荐，发热后可能临时降到 30，冷却后自行回到 60；120 最顺滑也最热，需要 120 Hz 面板，60 Hz 设备自动回退到 60。重启游戏后生效 · 30 is the coolest and holds steady over time; 60 is recommended — after the SoC heats up the game may drop to 30 for a while and return to 60 once it cools; 120 is the smoothest and hottest and needs a 120 Hz panel (a 60 Hz device falls back to 60). Takes effect after relaunching</string>
-		</dict>
-		<dict>
-			<key>Type</key>
-			<string>PSToggleSwitchSpecifier</string>
-			<key>Key</key>
-			<string>TOTK_MFX_INTERP</string>
-			<key>Title</key>
-			<string>MetalFX 补帧 · MetalFX interpolation</string>
-			<key>DefaultValue</key>
-			<false/>
-			<key>FooterText</key>
-			<string>开启后：30 帧补到 60，60 帧补到 120；120 帧本身没有余量，补帧不生效。约多一帧延迟，快速移动可能有伪影（实验）。重启游戏后生效 · on: 30→60, 60→120; 120 has no headroom, so it does nothing there. About one frame of latency and possible motion artifacts (experimental). Takes effect after relaunching</string>
 		</dict>
 		<dict>
 			<key>Type</key>

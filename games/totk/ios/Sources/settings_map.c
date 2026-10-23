@@ -24,15 +24,12 @@ int totk_picture_env_build(const char *mode, int scene_upscale, totk_picture_env
     return 0;
 }
 
-int totk_frame_env_build(const char *cap, int interpolate, totk_frame_env *out) {
+int totk_frame_env_build(const char *cap, totk_frame_env *out) {
     if (!cap) return 0;
     totk_frame_env e;
-    if (!strcmp(cap, "30"))
-        e = interpolate ? (totk_frame_env){"60", NULL, "interp30"} : (totk_frame_env){NULL, "30", "0"};
-    else if (!strcmp(cap, "60"))
-        e = interpolate ? (totk_frame_env){"120", NULL, "interp"} : (totk_frame_env){"60", NULL, "0"};
-    else if (!strcmp(cap, "120"))
-        e = (totk_frame_env){"120", NULL, "0"};   /* one generated frame cannot exceed the panel */
+    if (!strcmp(cap, "30")) e = (totk_frame_env){NULL, "30"};
+    else if (!strcmp(cap, "60")) e = (totk_frame_env){"60", NULL};
+    else if (!strcmp(cap, "120")) e = (totk_frame_env){"120", NULL};
     else return 0;
     *out = e;
     return 1;

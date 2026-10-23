@@ -207,46 +207,34 @@ static void apply_settings(void) {
     setenv("TOTK_MFX_UPSCALE", penv.scene_upscale, 1);
     setenv("TOTK_MFX_OUTPUT", penv.output_upscale, 1);
     setenv("TOTK_IOS_OUTPUT_FULL", penv.native_canvas, 1);
-    /* Frame rate is two independent choices: a cap, and whether MetalFX fills the frame between two game frames. */
+    /* Frame rate is one choice: the cap. MetalFX interpolation is not offered on iOS (see settings_map.h). */
     NSString *cap = [d stringForKey:@"TOTK_FPS_CAP"];
-    BOOL interp = [d boolForKey:@"TOTK_MFX_INTERP"];
-    /* Before the two switches existed, "interp" was a frame-mode value; adopt it once. */
+    /* Older builds stored a frame mode here; "interp" was one of them. Adopt the default instead of an unknown value. */
     if ([cap isEqualToString:@"interp"]) {
         cap = [NSString stringWithUTF8String:totk_frame_cap_default()];
-        interp = YES;
         [d setObject:cap forKey:@"TOTK_FPS_CAP"];
-        [d setBool:YES forKey:@"TOTK_MFX_INTERP"];
-        fprintf(stderr, "[totk] settings: old frame mode interp -> %s fps with interpolation\n", cap.UTF8String);
+        fprintf(stderr, "[totk] settings: old frame mode interp -> %s fps\n", cap.UTF8String);
     }
     totk_frame_env fenv;
-    if (!totk_frame_env_build(cap.UTF8String, interp, &fenv)) {
+    if (!totk_frame_env_build(cap.UTF8String, &fenv)) {
         fprintf(stderr, "[totk] settings: frame cap \"%s\" is not a pane value; using %s\n",
                 cap.UTF8String ?: "", totk_frame_cap_default());
         cap = [NSString stringWithUTF8String:totk_frame_cap_default()];
-        interp = NO;
         [d setObject:cap forKey:@"TOTK_FPS_CAP"];
-        [d setBool:NO forKey:@"TOTK_MFX_INTERP"];
-        totk_frame_env_build(cap.UTF8String, interp, &fenv);
+        totk_frame_env_build(cap.UTF8String, &fenv);
     }
-    if (interp && [cap isEqualToString:@"120"]) {
-        fprintf(stderr, "[totk] settings: interpolation has no headroom at 120 fps; turning it off\n");
-        interp = NO;
-        [d setBool:NO forKey:@"TOTK_MFX_INTERP"];
-        totk_frame_env_build(cap.UTF8String, interp, &fenv);
-    }
-    /* 120 Hz is needed both for the 120 cap and for 60 + interpolation; on a 60 Hz panel run 60 without it. */
+    /* The 120 cap needs a 120 Hz panel; on a 60 Hz one run 60. */
     if (fenv.present_hz && !strcmp(fenv.present_hz, "120") && panel_max_hz() < 120) {
-        fprintf(stderr, "[totk] settings: %s fps%s needs 120 Hz; this panel is %ld Hz, using 60 without interpolation\n",
-                cap.UTF8String, interp ? " with interpolation" : "", (long)panel_max_hz());
+        fprintf(stderr, "[totk] settings: %s fps needs 120 Hz; this panel is %ld Hz, using 60\n",
+                cap.UTF8String, (long)panel_max_hz());
         cap = [NSString stringWithUTF8String:totk_frame_cap_default()];
-        interp = NO;
         [d setObject:cap forKey:@"TOTK_FPS_CAP"];
-        [d setBool:NO forKey:@"TOTK_MFX_INTERP"];
-        totk_frame_env_build(cap.UTF8String, interp, &fenv);
+        totk_frame_env_build(cap.UTF8String, &fenv);
     }
     if (fenv.present_hz) setenv("DM_PRESENT_HZ", fenv.present_hz, 1); else unsetenv("DM_PRESENT_HZ");
     if (fenv.fps) setenv("DM_FPS", fenv.fps, 1); else unsetenv("DM_FPS");
-    setenv("TOTK_MFX", fenv.interp, 1);
+    /* Interpolation stays off for players; a devicectl TOTK_MFX still wins for a measurement (overwrite 0). */
+    setenv("TOTK_MFX", "0", 0);
     /* A scene stored by the old free-form pane may not be one of the pane's values any more; adopt its default
        instead of leaving a value the pane cannot represent. A valid devicectl value still wins: the loop above left
        the environment alone, so use the effective value and only overwrite an invalid one. */
@@ -286,11 +274,11 @@ static void apply_settings(void) {
     setenv("TOTK_GPU_KEEPALIVE", "0", 0);
     NSString *drawable = [NSString stringWithUTF8String:penv.drawable];
     /* getenv, not the stored switches: the picture mode may have overridden them. */
-    fprintf(stderr, "[totk] settings: picture %s, display %s, scene %s, fps %s, interp %d (hz %s, fps %s, mfx %s), aspect %s, hud %s/%s, taa %d, mfx %s/%s, full %s, keyboard %s, touch-with-keyboard %d, backup %d\n",
+    fprintf(stderr, "[totk] settings: picture %s, display %s, scene %s, fps %s (hz %s, fps %s, mfx %s), aspect %s, hud %s/%s, taa %d, mfx %s/%s, full %s, keyboard %s, touch-with-keyboard %d, backup %d\n",
             picture.UTF8String ?: "mfx",
             drawable.UTF8String ?: "?",
             scene.UTF8String ?: "?",
-            cap.UTF8String ?: "60", (int)interp,
+            cap.UTF8String ?: "60",
             getenv("DM_PRESENT_HZ") ?: "-", getenv("DM_FPS") ?: "-", getenv("TOTK_MFX") ?: "-",
             [[d stringForKey:@"TOTK_ASPECT"] UTF8String] ?: "?",
             getenv("TOTK_FPS_OVERLAY") ?: "1", getenv("TOTK_SHADER_OVERLAY") ?: "1",

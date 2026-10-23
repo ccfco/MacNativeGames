@@ -57,6 +57,14 @@ class IOSSettings(unittest.TestCase):
         self.assertEqual(picture_default, rows['TOTK_IOS_PICTURE_MODE']['DefaultValue'])
         self.assertEqual(frame_default, rows['TOTK_FPS_CAP']['DefaultValue'])
 
+    def test_no_interpolation_switch(self):
+        with open(ROOT / 'games/totk/ios/Settings.bundle/Root.plist', 'rb') as file:
+            root = plistlib.load(file)
+        rows = {item['Key']: item for item in root['PreferenceSpecifiers'] if 'Key' in item}
+        # MetalFX interpolation costs more GPU than the frames it replaces on this device and a downscaled output is
+        # not accepted by the interpolator, so the pane must not offer a switch that can only hurt.
+        self.assertNotIn('TOTK_MFX_INTERP', rows)
+
     def test_overlays_are_separate_switches(self):
         with open(ROOT / 'games/totk/ios/Settings.bundle/Root.plist', 'rb') as file:
             root = plistlib.load(file)

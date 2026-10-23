@@ -24,14 +24,14 @@ static int wants(const char *got, const char *want) {
     return !got || strcmp(got, want);
 }
 
-static void frame(const char *cap, int interp, const char *hz, const char *fps, const char *mfx) {
+static void frame(const char *cap, const char *hz, const char *fps) {
     totk_frame_env e;
-    if (!totk_frame_env_build(cap, interp, &e)) { failures++; fprintf(stderr, "frame %s/%d: not accepted\n", cap, interp); return; }
-    if (wants(e.present_hz, hz) || wants(e.fps, fps) || strcmp(e.interp, mfx)) {
+    if (!totk_frame_env_build(cap, &e)) { failures++; fprintf(stderr, "frame %s: not accepted\n", cap); return; }
+    if (wants(e.present_hz, hz) || wants(e.fps, fps)) {
         failures++;
-        fprintf(stderr, "frame %s/%d: %s/%s/%s, want %s/%s/%s\n", cap, interp,
-                e.present_hz ? e.present_hz : "(unset)", e.fps ? e.fps : "(unset)", e.interp,
-                hz ? hz : "(unset)", fps ? fps : "(unset)", mfx);
+        fprintf(stderr, "frame %s: %s/%s, want %s/%s\n", cap,
+                e.present_hz ? e.present_hz : "(unset)", e.fps ? e.fps : "(unset)",
+                hz ? hz : "(unset)", fps ? fps : "(unset)");
     }
 }
 
@@ -43,8 +43,8 @@ static int picture_accepts(const char *mode) {
 }
 
 static int frame_cap_accepts(const char *cap) {
-    totk_frame_env off, on;
-    return totk_frame_env_build(cap, 0, &off) && totk_frame_env_build(cap, 1, &on) && off.interp && on.interp;
+    totk_frame_env e;
+    return totk_frame_env_build(cap, &e) && (e.present_hz || e.fps);
 }
 
 static void hud(int status_line, int counts, const char *mode, const char *fps, const char *shaders) {
@@ -91,14 +91,11 @@ int main(int argc, char **argv) {
         failures++; fprintf(stderr, "unknown picture modes must be rejected without touching the result\n");
     }
 
-    frame("30", 0, NULL, "30", "0");
-    frame("30", 1, "60", NULL, "interp30");
-    frame("60", 0, "60", NULL, "0");
-    frame("60", 1, "120", NULL, "interp");
-    frame("120", 0, "120", NULL, "0");
-    frame("120", 1, "120", NULL, "0");
-    totk_frame_env f = {"keep", "keep", "keep"};
-    if (totk_frame_env_build("90", 0, &f) || totk_frame_env_build(NULL, 0, &f) || strcmp(f.present_hz, "keep")) {
+    frame("30", NULL, "30");
+    frame("60", "60", NULL);
+    frame("120", "120", NULL);
+    totk_frame_env f = {"keep", "keep"};
+    if (totk_frame_env_build("90", &f) || totk_frame_env_build(NULL, &f) || strcmp(f.present_hz, "keep")) {
         failures++; fprintf(stderr, "unknown frame caps must be rejected without touching the result\n");
     }
     /* The runtime draws the counts only in its "all" mode, so any overlay that is on has to raise the mode. */
