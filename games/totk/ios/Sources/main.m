@@ -267,6 +267,8 @@ static void apply_settings(void) {
         if ([value isKindOfClass:NSNumber.class]) {
             setenv(key.UTF8String, [value boolValue] ? "1" : "0", 0);
         } else if ([value isKindOfClass:NSString.class] && [value length] && [value length] < 64) {
+            /* services.c takes a language code of up to 7 bytes and runtime_fails on a longer one. */
+            if ([key isEqualToString:@"TOTK_LANG"] && [value length] > 7) continue;
             setenv(key.UTF8String, [value UTF8String], 0);
         }
         /* overwrite=0: a devicectl value for a plain key still wins. The layer block below owns the picture and frame
@@ -276,7 +278,8 @@ static void apply_settings(void) {
     NSString *layer;
     if (custom) {
         /* The picture mode owns the drawable, the output upscale and the operation mode (the 1080 entry runs the
-           game's docked settings); the scene upscale is the pane's own switch (TOTK_MFX_UPSCALE). */
+           game's docked settings). The scene upscale stays the pane's own switch, except for the MetalFX entry: its
+           output upscale only runs while that switch is on, so the entry turns it on itself. */
         NSString *picture = [d stringForKey:@"TOTK_IOS_PICTURE_MODE"];
         totk_picture_env penv;
         if (!totk_picture_env_build(picture.UTF8String, &penv)) {
@@ -287,6 +290,7 @@ static void apply_settings(void) {
         }
         setenv("TOTK_IOS_DRAWABLE_H", penv.drawable, 1);
         setenv("TOTK_MFX_OUTPUT", penv.output_upscale, 1);
+        if (penv.scene_upscale) setenv("TOTK_MFX_UPSCALE", penv.scene_upscale, 1);
         apply_operation_mode(penv.operation);
         /* Frame rate is one choice: the cap. */
         NSString *cap = [d stringForKey:@"TOTK_FPS_CAP"];
@@ -298,21 +302,19 @@ static void apply_settings(void) {
             [d setObject:cap forKey:@"TOTK_FPS_CAP"];
             totk_frame_env_build(cap.UTF8String, &fenv);
         }
-        /* The 120 cap leaves the pacing to the uncapped path, whose ceiling is the display's own rate: a 60 Hz panel
-           simply never gets above 60, so there is no separate fallback to apply. */
         apply_frame_env(&fenv, 1);
-        /* A stored scene the pane no longer offers would leave the game at a size it cannot name; use the pane's default
-           and say so. A valid devicectl value was already applied and survives this check. */
+        /* A stored scene the pane no longer offers would leave the game at a size it cannot name; use the pane's
+           default and say so. A value from devicectl is this launch's input rather than the player's stored choice,
+           so it is left alone (the runtime validates it itself). */
         NSDictionary *scene_row = pref_row(root, @"TOTK_RENDER_RES");
         NSArray *scene_values = scene_row[@"Values"] ?: @[];
         NSString *fallback = scene_row[@"DefaultValue"] ?: @"960x540";
-        const char *scene = getenv("TOTK_RENDER_RES");
-        NSString *scene_text = scene && *scene ? [NSString stringWithUTF8String:scene] : nil;
+        NSString *scene_text = [d stringForKey:@"TOTK_RENDER_RES"];
         if (scene_values.count && (!scene_text || ![scene_values containsObject:scene_text])) {
             fprintf(stderr, "[totk] settings: scene \"%s\" is not a pane value; using %s\n",
                     scene_text.UTF8String ?: "", fallback.UTF8String);
             [d setObject:fallback forKey:@"TOTK_RENDER_RES"];
-            setenv("TOTK_RENDER_RES", fallback.UTF8String, 1);
+            if (!getenv("TOTK_RENDER_RES")) setenv("TOTK_RENDER_RES", fallback.UTF8String, 1);
         }
         layer = [NSString stringWithFormat:@"custom (%@, scene %s, %@ fps)", picture, getenv("TOTK_RENDER_RES") ?: "?", cap];
     } else {
@@ -338,10 +340,9 @@ static void apply_settings(void) {
         layer = [NSString stringWithFormat:@"presets (%@, %@ fps)",
                  [d boolForKey:@"TOTK_DOCKED"] ? @"Full HD docked" : @"handheld", preset_fps];
     }
-    /* One switch per overlay: the status line in the top-right corner and the shader/pipeline counts in the
-       bottom-left; the runtime reads both independently (gfx/nvn/fps_overlay.c). */
-    setenv("TOTK_FPS_OVERLAY", [d boolForKey:@"TOTK_FPS_OVERLAY"] ? "1" : "0", 0);
-    setenv("TOTK_SHADER_OVERLAY", [d boolForKey:@"TOTK_SHADER_OVERLAY"] ? "1" : "0", 0);
+    /* The pane's rows are handed over as they are. Two overlays are their own switches (the runtime reads them
+       independently, gfx/nvn/fps_overlay.c); they come through this loop with every other row, so a pane that is
+       missing leaves the runtime's own default (on) in place. */
     fprintf(stderr, "[totk] settings: %s; drawable %s, scene %s, hz %s, phone %s, overlays %s/%s, taa %d, mfx %s/%s\n",
             layer.UTF8String,
             getenv("TOTK_IOS_DRAWABLE_H") ?: "default",
