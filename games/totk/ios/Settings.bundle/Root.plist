@@ -137,12 +137,12 @@
 			</array>
 			<key>Titles</key>
 			<array>
-				<string>MetalFX 2K（1080p 画布 + 输出超分，文字最清楚）· MetalFX 2K (1080p canvas + output upscaling, sharpest text)</string>
+				<string>MetalFX 2K（原生画布 + 两级超分，文字最清楚）· MetalFX 2K (native canvas + both upscales, sharpest text)</string>
 				<string>1080p（画布原生，不做输出超分，更凉）· 1080p (native canvas, no output upscaling, cooler)</string>
 				<string>720p（默认，最省电）· 720p (default, lowest power)</string>
 			</array>
 			<key>FooterText</key>
-			<string>画质模式决定显示缓冲的大小、画布要不要由 MetalFX 放大到面板，以及是否使用游戏的底座设定（1080 档）；场景分辨率只影响 3D 世界。以上设置在「使用自定义设置」打开时生效。重启游戏后生效 · the picture mode sets the drawable, whether MetalFX upscales the canvas to the panel, and whether the game runs its docked settings (the 1080 entry); the scene resolution affects the 3D world only. Both apply while "Use custom settings" is on. Takes effect after relaunching</string>
+			<string>画质模式决定显示缓冲的大小、画布要不要由 MetalFX 放大到面板，以及是否使用游戏的底座设定（1080 档）；MetalFX 2K 还会打开场景超分，因为输出超分需要它。场景分辨率只影响 3D 世界。以上设置在「使用自定义设置」打开时生效。重启游戏后生效 · the picture mode sets the drawable, whether MetalFX upscales the canvas to the panel, and whether the game runs its docked settings (the 1080 entry); MetalFX 2K also turns the scene upscale on, which the output upscale needs. The scene resolution affects the 3D world only. Both apply while "Use custom settings" is on. Takes effect after relaunching</string>
 		</dict>
 		<dict>
 			<key>Type</key>
@@ -185,16 +185,14 @@
 			<array>
 				<string>30</string>
 				<string>60</string>
-				<string>120</string>
 			</array>
 			<key>Titles</key>
 			<array>
 				<string>30 帧（省电，最稳）· 30 fps (coolest, steadiest)</string>
 				<string>60 帧（推荐）· 60 fps</string>
-				<string>120 帧（不限速，最高到屏幕刷新率）· 120 fps (uncapped, up to the display's rate)</string>
 			</array>
 			<key>FooterText</key>
-			<string>30 最省电也最稳，长时间不变；60 推荐，发热后可能临时降到 30，冷却后自行回到 60；120 不限制节奏，能跑多快跑多快，最高就是屏幕刷新率（ProMotion iPad 为 120，60 Hz 设备就是 60）。重启游戏后生效 · 30 is the coolest and holds steady over time; 60 is recommended — after the SoC heats up the game may drop to 30 for a while and return to 60 once it cools; 120 leaves the pacing to the game, up to the display's refresh rate (120 on a ProMotion iPad, 60 on a 60 Hz screen). Takes effect after relaunching</string>
+			<string>30 最省电也最稳，长时间不变；60 推荐，发热后可能临时降到 30，冷却后自行回到 60。iOS 的显示链路固定 60 Hz，没有更高的档位可给。重启游戏后生效 · 30 is the coolest and holds steady over time; 60 is recommended — after the SoC heats up the game may drop to 30 for a while and return to 60 once it cools. The iOS display link is fixed at 60 Hz, so there is no higher rate to offer. Takes effect after relaunching</string>
 		</dict>
 		<dict>
 			<key>Type</key>
@@ -259,112 +257,6 @@
 			<true/>
 			<key>FooterText</key>
 			<string>显示本次新翻译的着色器 / 缓存总数，以及本次新建的渲染管线；收集到新东西时会变黄 · shows the shaders translated this run against the cache total, plus the render pipelines built this run; it turns yellow when something new is collected</string>
-		</dict>
-		<dict>
-			<key>Type</key>
-			<string>PSGroupSpecifier</string>
-			<key>Title</key>
-			<string>手柄 · Controller</string>
-			<key>FooterText</key>
-			<string>重启游戏后生效 · takes effect after relaunching</string>
-		</dict>
-		<dict>
-			<key>Type</key>
-			<string>PSToggleSwitchSpecifier</string>
-			<key>Key</key>
-			<string>TOTK_GYRO</string>
-			<key>Title</key>
-			<string>手柄陀螺仪 · Controller gyroscope</string>
-			<key>DefaultValue</key>
-			<true/>
-			<key>FooterText</key>
-			<string>需要带陀螺仪的手柄（DualSense / DualShock / Switch Pro）· needs a controller with a gyroscope</string>
-		</dict>
-		<dict>
-			<key>Type</key>
-			<string>PSToggleSwitchSpecifier</string>
-			<key>Key</key>
-			<string>TOTK_RUMBLE</string>
-			<key>Title</key>
-			<string>手柄震动 · Controller rumble</string>
-			<key>DefaultValue</key>
-			<true/>
-			<key>FooterText</key>
-			<string>需要支持 HD 震动的手柄 · needs a controller with haptics</string>
-		</dict>
-		<dict>
-			<key>Type</key>
-			<string>PSGroupSpecifier</string>
-			<key>Title</key>
-			<string>键盘 · Keyboard</string>
-			<key>FooterText</key>
-			<string>重启游戏后生效 · takes effect after relaunching</string>
-		</dict>
-		<dict>
-			<key>Type</key>
-			<string>PSRadioGroupSpecifier</string>
-			<key>Key</key>
-			<string>TOTK_KEYBOARD</string>
-			<key>Title</key>
-			<string>键盘 · Keyboard</string>
-			<key>DefaultValue</key>
-			<string>auto</string>
-			<key>Values</key>
-			<array>
-				<string>auto</string>
-				<string>off</string>
-			</array>
-			<key>Titles</key>
-			<array>
-				<string>自动（连接时启用）</string>
-				<string>关闭</string>
-			</array>
-			<key>FooterText</key>
-			<string>妙控键盘、智能键盘或蓝牙键盘均可；关闭后只用触屏和手柄，防止键盘异常时无法操作 · works with a Magic Keyboard, Smart Keyboard or Bluetooth keyboard; off keeps touch and controllers only</string>
-		</dict>
-		<dict>
-			<key>Type</key>
-			<string>PSToggleSwitchSpecifier</string>
-			<key>Key</key>
-			<string>TOTK_TOUCH_WITH_KEYBOARD</string>
-			<key>Title</key>
-			<string>连接键盘时保留触屏 · Keep touch with a keyboard</string>
-			<key>DefaultValue</key>
-			<false/>
-			<key>FooterText</key>
-			<string>默认像手柄一样收起触控层；打开后键盘和触屏同时可用 · the touch layer hides for a keyboard by default; on keeps both</string>
-		</dict>
-		<dict>
-			<key>Type</key>
-			<string>PSGroupSpecifier</string>
-			<key>Title</key>
-			<string>存档 · Save</string>
-			<key>FooterText</key>
-			<string>重启游戏后生效 · takes effect after relaunching</string>
-		</dict>
-		<dict>
-			<key>Type</key>
-			<string>PSToggleSwitchSpecifier</string>
-			<key>Key</key>
-			<string>TOTK_BACKUP</string>
-			<key>Title</key>
-			<string>备份存档到文件夹 · Back up saves to a folder</string>
-			<key>DefaultValue</key>
-			<false/>
-			<key>FooterText</key>
-			<string>默认关闭。打开后第一次启动会弹出系统文件夹选择器，选一个位置（iCloud Drive 或「我的 iPad」任意文件夹），存档会镜像到其中的「Tears of the Kingdom」文件夹；卸载 App 不会删除它，重装后首次启动自动恢复。关闭后不再备份，已选的文件夹保留 · off by default. When on, the first launch shows the system folder picker; the save is mirrored into a "Tears of the Kingdom" folder at the chosen place (iCloud Drive or anywhere in Files). Uninstalling the app keeps it, and a fresh install restores from it automatically</string>
-		</dict>
-		<dict>
-			<key>Type</key>
-			<string>PSToggleSwitchSpecifier</string>
-			<key>Key</key>
-			<string>TOTK_SAVE_IMPORT</string>
-			<key>Title</key>
-			<string>从文件夹导入存档 · Import a save from a folder</string>
-			<key>DefaultValue</key>
-			<false/>
-			<key>FooterText</key>
-			<string>打开后，下次启动会让你选一个含存档的文件夹（备份文件夹也可以），确认后替换当前存档；当前存档会先备份到 App 的 Documents/save-before-import。导入完成或取消后此开关自动关闭 · when on, the next launch asks for a folder holding a save (a backup folder works too) and replaces the current one after you confirm; the current save is kept in the app's Documents/save-before-import. The switch turns itself off afterwards</string>
 		</dict>
 		<dict>
 			<key>Type</key>
