@@ -119,8 +119,9 @@ static const char *const kDirectoryEnvs[] = {"TOTK_PROFILE_DIR", "TOTK_GAME_SLOT
         [self restoreIfFreshWithCompletion:done];
         return;
     }
-    /* A bookmark that no longer resolves is a broken backup, not a player who said "later": ask again. */
-    if (bookmark) [defaults removeObjectForKey:kDeclined];
+    /* A bookmark that no longer resolves is a broken backup, not a player who said "later": ask again once, then forget
+       the dead bookmark — otherwise it clears "Later" on every launch and the prompt can never be dismissed. */
+    if (bookmark) { [defaults removeObjectForKey:kBookmark]; [defaults removeObjectForKey:kDeclined]; }
     if ([defaults boolForKey:kDeclined]) {
         fprintf(stderr, "[totk-save] backup folder not chosen earlier; starting without one (choose it again in Settings)\n");
         done();
@@ -323,18 +324,43 @@ static const char *const kDirectoryEnvs[] = {"TOTK_PROFILE_DIR", "TOTK_GAME_SLOT
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@(TOTK_UI("导入存档？", "Import this save?"))
                                                                   message:message
                                                            preferredStyle:UIAlertControllerStyleAlert];
+    __block BOOL answered = NO;   /* the player answered: the timeout must stop asking */
+    __block BOOL finished = NO;
+    void (^finish)(void) = ^{
+        if (finished) return;
+        finished = YES;
+        done();
+    };
     [alert addAction:[UIAlertAction actionWithTitle:@(TOTK_UI("取消", "Cancel")) style:UIAlertActionStyleCancel
                                             handler:^(UIAlertAction *action) {
         (void)action;
+        answered = YES;
         if (scoped) [picked stopAccessingSecurityScopedResource];
-        done();
+        finish();
     }]];
     [alert addAction:[UIAlertAction actionWithTitle:@(TOTK_UI("导入", "Import")) style:UIAlertActionStyleDefault
                                             handler:^(UIAlertAction *action) {
         (void)action;
-        [self copyImport:source from:picked scoped:scoped completion:done];
+        answered = YES;   /* the copy may take a while; the game must not start on a half-written save */
+        [self copyImport:source from:picked scoped:scoped completion:finish];
     }]];
-    [host presentViewController:alert animated:YES completion:nil];
+    [host presentViewController:alert animated:YES completion:^{
+        if (host.presentedViewController != alert) {   /* another presenter won: do not leave the game waiting */
+            fprintf(stderr, "[totk-save] import prompt could not be shown; skipped\n");
+            answered = YES;
+            if (scoped) [picked stopAccessingSecurityScopedResource];
+            finish();
+        }
+    }];
+    /* A prompt nobody answers (a scene torn down while it is up) must not keep the game from starting. */
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(300 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (answered) return;
+        fprintf(stderr, "[totk-save] import prompt did not answer in 5 minutes; skipped\n");
+        answered = YES;
+        [alert dismissViewControllerAnimated:YES completion:nil];
+        if (scoped) [picked stopAccessingSecurityScopedResource];
+        finish();
+    });
 }
 
 - (void)copyImport:(NSURL *)source from:(NSURL *)picked scoped:(BOOL)scoped completion:(void (^)(void))done {
@@ -372,10 +398,17 @@ static const char *const kDirectoryEnvs[] = {"TOTK_PROFILE_DIR", "TOTK_GAME_SLOT
                 [files removeItemAtURL:temporary error:nil];
                 continue;
             }
-            [files removeItemAtURL:to error:nil];
+            /* Swap in place: replaceItemAtURL keeps the old folder until the new one is moved over, so a failure here
+               leaves the live save readable instead of removing it first (the old order did, 2026-10-26). */
             NSError *error = nil;
-            if (![files moveItemAtURL:temporary toURL:to error:&error]) {
-                fprintf(stderr, "[totk-save] import swap failed: %s (the copy stays in %s)\n",
+            BOOL placed;
+            if ([files fileExistsAtPath:to.path])
+                placed = [files replaceItemAtURL:to withItemAtURL:temporary backupItemName:nil options:0
+                               resultingItemURL:NULL error:&error];
+            else
+                placed = [files moveItemAtURL:temporary toURL:to error:&error];
+            if (!placed) {
+                fprintf(stderr, "[totk-save] import swap failed: %s (the live save is untouched; the copy stays in %s)\n",
                         error.localizedDescription.UTF8String, temporary.path.UTF8String);
                 if (scoped) [picked stopAccessingSecurityScopedResource];
                 dispatch_async(dispatch_get_main_queue(), done);

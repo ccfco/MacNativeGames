@@ -550,6 +550,8 @@ void runtime_feedback_attach(GCController *c) {   /* main queue */
         if (!m || !m.hasRotationRate) { fprintf(stderr, "[gyro] %s has no gyro: no motion from it\n", name); return; }
         if (motionPad && motionPad != c) {   /* one motion feed only: two controllers would be mixed into one fusion */
             motionPad.motion.valueChangedHandler = nil;
+            /* A controller that needed manual activation keeps its sensors powered until told otherwise. */
+            if (motionPad.motion.sensorsRequireManualActivation) motionPad.motion.sensorsActive = NO;
             runtime_motion_live(0);
         }
         if (m.sensorsRequireManualActivation) m.sensorsActive = YES;

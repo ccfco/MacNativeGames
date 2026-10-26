@@ -74,8 +74,14 @@ int runtime_front_text_input(const RuntimeTextRequest *req, char *out, size_t ou
         }]];
         [alert addAction:ok];
         presented = alert;
-        [host presentViewController:alert animated:YES completion:nil];
-        fprintf(stderr, "[totk] keyboard: alert shown (%s, %d-%d characters)\n", prompt.UTF8String, minUnits, maxUnits);
+        [host presentViewController:alert animated:YES completion:^{
+            if (host.presentedViewController != alert) {   /* another modal won: answer now instead of at the timeout */
+                fprintf(stderr, "[totk] keyboard: the alert could not be shown; cancelled\n");
+                dispatch_semaphore_signal(done);
+                return;
+            }
+            fprintf(stderr, "[totk] keyboard: alert shown (%s, %d-%d characters)\n", prompt.UTF8String, minUnits, maxUnits);
+        }];
     });
     /* A cancelled or unreachable alert must not hang the guest thread forever. */
     long timedOut = dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 10 * 60 * NSEC_PER_SEC));

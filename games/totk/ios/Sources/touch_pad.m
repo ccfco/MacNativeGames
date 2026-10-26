@@ -55,7 +55,8 @@ static const CGFloat kFpsButtonSize = 34;
     GCKeyboard *keyboard = [note.name isEqualToString:GCKeyboardDidConnectNotification] && [note.object isKindOfClass:GCKeyboard.class]
                          ? note.object : GCKeyboard.coalescedKeyboard;
     const char *keyboardMode = getenv("TOTK_KEYBOARD");
-    BOOL keyboardOn = !(keyboardMode && !strcmp(keyboardMode, "off")) && keyboard != nil;
+    /* The pane's switch arrives as "1"/"0" (the generic dispatch in main.m); "off" is the older spelling. */
+    BOOL keyboardOn = !(keyboardMode && (!strcmp(keyboardMode, "off") || !strcmp(keyboardMode, "0"))) && keyboard != nil;
     const char *touchWithKeyboard = getenv("TOTK_TOUCH_WITH_KEYBOARD");
     BOOL keepTouch = touchWithKeyboard && !strcmp(touchWithKeyboard, "1");
     BOOL hidden = connected || (keyboardOn && !keepTouch);

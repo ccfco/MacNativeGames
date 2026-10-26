@@ -128,6 +128,18 @@ class IOSSettings(unittest.TestCase):
             self.assertIs(rows[key]['DefaultValue'], True)
 
 
+    def test_controller_and_keyboard_switches_exist(self):
+        # The runtime turns these on by default (hid_feedback.c's setting_on, touch_pad.m's keyboard check), so the pane
+        # must offer rows with the same defaults: without them an iPad player cannot turn rumble off, and a connected
+        # keyboard hides the touch controls with no way back.
+        rows = self._rows()
+        for key, default in (('TOTK_KEYBOARD', True), ('TOTK_TOUCH_WITH_KEYBOARD', False),
+                             ('TOTK_RUMBLE', True), ('TOTK_GYRO', True)):
+            self.assertIn(key, rows, key)
+            self.assertEqual(rows[key]['Type'], 'PSToggleSwitchSpecifier', key)
+            self.assertIs(rows[key]['DefaultValue'], default, key)
+
+
     def test_every_row_is_applied_at_launch(self):
         # main.m registers every TOTK_* row that has a DefaultValue and hands it to the runtime as an environment
         # variable; a row without one, or a key without the prefix, would show in Settings and change nothing.
