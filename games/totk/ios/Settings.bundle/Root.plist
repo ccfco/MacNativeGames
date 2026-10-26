@@ -67,6 +67,10 @@
 			<string>PSToggleSwitchSpecifier</string>
 			<key>Key</key>
 			<string>TOTK_DOCKED</string>
+			<key>TOTKApp</key>
+			<string>totk</string>
+			<key>TOTKPhone</key>
+			<true/>
 			<key>Title</key>
 			<string>Full HD（底座模式）· Full HD (docked)</string>
 			<key>DefaultValue</key>
@@ -78,13 +82,17 @@
 			<key>Title</key>
 			<string>画面比例 · Aspect ratio</string>
 			<key>FooterText</key>
-			<string>与预设、自定义无关，两种模式下都生效 · independent of the presets and the custom layer; applies in both</string>
+			<string>与预设、自定义无关，两种模式下都生效。重新启动游戏后生效 · independent of the presets and the custom layer; applies in both. Takes effect after relaunching</string>
 		</dict>
 		<dict>
 			<key>Type</key>
 			<string>PSRadioGroupSpecifier</string>
 			<key>Key</key>
 			<string>TOTK_ASPECT</string>
+			<key>TOTKApp</key>
+			<string>totk</string>
+			<key>TOTKPhone</key>
+			<true/>
 			<key>Title</key>
 			<string>画面比例 · Aspect ratio</string>
 			<key>DefaultValue</key>
@@ -100,7 +108,7 @@
 				<string>16:9（黑边）· 16:9 letterbox</string>
 			</array>
 			<key>FooterText</key>
-			<string>填满屏幕不拉伸画面：相机按屏幕比例取景，呈现时再还原比例。iPad 比 16:9 窄，所以两侧会少一点、上下填满；16:9 保留完整宽度并加黑边。部分 UI 特效可能随取景偏移 · fill does not stretch: the camera takes the screen's aspect and the present pass restores the proportions. An iPad is narrower than 16:9, so a little is lost at the sides and the height is filled; 16:9 keeps the full width with bars. A few UI effects may sit off with a wider view</string>
+			<string>填满屏幕不拉伸画面：相机按屏幕比例取景，呈现时再还原比例。iPad 比 16:9 窄，所以两侧会少一点、上下填满；16:9 保留完整宽度并加黑边。部分 UI 特效可能随取景偏移 · fill does not stretch: the camera takes the screen's aspect and the present pass restores the proportions. An iPad is narrower than 16:9, so a little is lost at the sides and the height is filled; 16:9 keeps the full width with bars. A few UI effects may sit off with this framing</string>
 		</dict>
 		<dict>
 			<key>Type</key>
@@ -115,6 +123,8 @@
 			<string>PSMultiValueSpecifier</string>
 			<key>Key</key>
 			<string>TOTK_PHONE_FPS</string>
+			<key>TOTKPhone</key>
+			<true/>
 			<key>Title</key>
 			<string>幀率 · Frame rate</string>
 			<key>DefaultValue</key>
@@ -143,6 +153,10 @@
 			<string>PSToggleSwitchSpecifier</string>
 			<key>Key</key>
 			<string>TOTK_CUSTOM_PICTURE</string>
+			<key>TOTKApp</key>
+			<string>totk</string>
+			<key>TOTKPhone</key>
+			<true/>
 			<key>Title</key>
 			<string>使用自定义设置 · Use custom settings</string>
 			<key>DefaultValue</key>
@@ -155,6 +169,10 @@
 			<string>PSRadioGroupSpecifier</string>
 			<key>Key</key>
 			<string>TOTK_IOS_PICTURE_MODE</string>
+			<key>TOTKApp</key>
+			<string>totk</string>
+			<key>TOTKPhone</key>
+			<true/>
 			<key>Title</key>
 			<string>画质模式 · Picture mode</string>
 			<key>DefaultValue</key>
@@ -179,6 +197,10 @@
 			<string>PSRadioGroupSpecifier</string>
 			<key>Key</key>
 			<string>TOTK_RENDER_RES</string>
+			<key>TOTKApp</key>
+			<string>totk</string>
+			<key>TOTKPhone</key>
+			<true/>
 			<key>Title</key>
 			<string>场景分辨率 · Scene resolution</string>
 			<key>DefaultValue</key>
@@ -207,6 +229,10 @@
 			<string>PSRadioGroupSpecifier</string>
 			<key>Key</key>
 			<string>TOTK_FPS_CAP</string>
+			<key>TOTKApp</key>
+			<string>totk</string>
+			<key>TOTKPhone</key>
+			<true/>
 			<key>Title</key>
 			<string>帧率上限 · Frame rate cap</string>
 			<key>DefaultValue</key>
@@ -237,6 +263,10 @@
 			<string>PSToggleSwitchSpecifier</string>
 			<key>Key</key>
 			<string>TOTK_MFX_UPSCALE</string>
+			<key>TOTKApp</key>
+			<string>totk</string>
+			<key>TOTKPhone</key>
+			<true/>
 			<key>Title</key>
 			<string>场景超分 · Scene upscaling</string>
 			<key>DefaultValue</key>
@@ -249,6 +279,10 @@
 			<string>PSToggleSwitchSpecifier</string>
 			<key>Key</key>
 			<string>TOTK_TAA</string>
+			<key>TOTKApp</key>
+			<string>totk</string>
+			<key>TOTKPhone</key>
+			<true/>
 			<key>Title</key>
 			<string>边缘平滑（MetalFX 时间抗锯齿）· Edge smoothing (MetalFX TAA)</string>
 			<key>DefaultValue</key>
@@ -269,6 +303,8 @@
 			<string>PSToggleSwitchSpecifier</string>
 			<key>Key</key>
 			<string>TOTK_FPS_OVERLAY</string>
+			<key>TOTKPhone</key>
+			<true/>
 			<key>Title</key>
 			<string>状态行（右上角）· Status line (top-right)</string>
 			<key>DefaultValue</key>
@@ -281,6 +317,8 @@
 			<string>PSToggleSwitchSpecifier</string>
 			<key>Key</key>
 			<string>TOTK_SHADER_OVERLAY</string>
+			<key>TOTKPhone</key>
+			<true/>
 			<key>Title</key>
 			<string>着色器与管线（左下角）· Shaders and pipelines (bottom-left)</string>
 			<key>DefaultValue</key>

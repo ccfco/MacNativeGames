@@ -116,10 +116,14 @@ class FullHD(unittest.TestCase):
     def test_botw_pane_drops_totk_only_rows(self):
         import plistlib
         root = plistlib.loads((TOOLS.parent/'Settings.bundle/Root.plist').read_bytes())
+        # The TOTKApp mark on each row is the only list of what Breath of the Wild must not show; if the marks were
+        # dropped, the filtered pane would keep every row and the assertions below would pass vacuously.
+        marked = {s['Key'] for s in root['PreferenceSpecifiers'] if s.get('TOTKApp') == 'totk'}
+        self.assertTrue(marked, 'no row is marked TOTKApp=totk')
         build_ipa.settings_without_totk(root)
         specs = root['PreferenceSpecifiers']
         keys = {s['Key'] for s in specs if 'Key' in s}
-        for key in build_ipa.TOTK_ONLY_SETTING_KEYS:
+        for key in marked:
             self.assertNotIn(key, keys)
         for key in ('TOTK_LANG', 'TOTK_PHONE_FPS', 'TOTK_FPS_OVERLAY', 'TOTK_SHADER_OVERLAY', 'TOTK_DEBUG_LOG'):
             self.assertIn(key, keys)

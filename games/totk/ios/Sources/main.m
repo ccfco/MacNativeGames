@@ -239,17 +239,16 @@ static void apply_settings(void) {
     NSMutableDictionary *defaults = [NSMutableDictionary dictionary];
     for (NSDictionary *item in root[@"PreferenceSpecifiers"] ?: @[]) {
         NSString *key = item[@"Key"]; id value = item[@"DefaultValue"];
-        if (key.length && [key hasPrefix:@"TOTK_"] && value) defaults[key] = value;
-    }
+        if (!key.length || ![key hasPrefix:@"TOTK_"] || !value) continue;
 #if TARGET_OS_VISION
-    /* The pane's picture and frame rows describe a phone or tablet display. On visionOS the platform's own defaults
-       (didFinishLaunching, below) own those keys: the window is not a 60 Hz panel, and its scene size comes from the
-       headset rather than from a phone's list. Handing the pane's values over would silently replace them. */
-    for (NSString *key in @[@"TOTK_IOS_PICTURE_MODE", @"TOTK_IOS_DRAWABLE_H", @"TOTK_RENDER_RES", @"TOTK_ASPECT",
-                            @"TOTK_MFX_UPSCALE", @"TOTK_TAA", @"TOTK_FPS_CAP", @"TOTK_FPS_OVERLAY", @"TOTK_SHADER_OVERLAY",
-                            @"TOTK_DOCKED", @"TOTK_PHONE_FPS", @"TOTK_CUSTOM_PICTURE"])
-        [defaults removeObjectForKey:key];
+        /* Rows marked TOTKPhone describe a phone or tablet display. On visionOS the platform's own defaults
+           (didFinishLaunching, below) own those keys: the window is not a 60 Hz panel, and its scene size comes from
+           the headset rather than from a phone's list. Handing the pane's values over would silently replace them.
+           The mark sits on the row itself (Root.plist), so a new display row needs no second list here. */
+        if ([item[@"TOTKPhone"] boolValue]) continue;
 #endif
+        defaults[key] = value;
+    }
     /* A package without the pane is broken; do not keep a second, hand-copied copy of the defaults here. Each
        consumer falls back to its own documented default (the picture and frame maps have theirs). */
     if (!defaults.count) fprintf(stderr, "[totk] settings: no Settings.bundle defaults; using the runtime defaults\n");
@@ -269,6 +268,13 @@ static void apply_settings(void) {
         } else if ([value isKindOfClass:NSString.class] && [value length] && [value length] < 64) {
             /* services.c takes a language code of up to 7 bytes and runtime_fails on a longer one. */
             if ([key isEqualToString:@"TOTK_LANG"] && [value length] > 7) continue;
+            /* The pane offers "" (fill the screen, never handed over) and "0" (16:9). Anything else - the old
+               "display" default, another platform's ratio - would reach aspect_install, whose phone branch treats every
+               value but "0"/"16:9" as fill without saying so. */
+            if ([key isEqualToString:@"TOTK_ASPECT"] && ![value isEqualToString:@"0"] && ![value isEqualToString:@"16:9"]) {
+                fprintf(stderr, "[totk] settings: aspect ratio \"%s\" is not a pane value; filling the screen\n", [value UTF8String]);
+                continue;
+            }
             setenv(key.UTF8String, [value UTF8String], 0);
         }
         /* overwrite=0: a devicectl value for a plain key still wins. The layer block below owns the picture and frame
