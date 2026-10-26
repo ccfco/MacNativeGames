@@ -43,6 +43,7 @@ uint64_t mtl_sub_commit(void);
 int mtl_probe_vertex_streams(void);
 int mtl_probe_vertex_input_types(void);
 int mtl_probe_fragment_output_types(void);
+int mtl_probe_pipeline_archive(void);
 int mtl_probe_arg_epoch(void);
 int mtl_probe_tex_slots(void);
 int mtl_probe_sampler_border(void);
