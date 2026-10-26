@@ -87,6 +87,17 @@ class IOSSettings(unittest.TestCase):
                 run = subprocess.run([str(executable), '--layer', key], capture_output=True, text=True)
                 self.assertEqual(run.stdout.strip(), layer, key)
 
+    def test_aspect_ratio_row_offers_only_valid_values(self):
+        # aspect_parse takes "" (the game's own framing), "0" (16:9) and explicit ratios; "display" was dropped with
+        # fitting the window (runtime/aspect_math.h) and would make the game runtime_fail, so the pane must not offer it.
+        rows = self._rows()
+        row = rows['TOTK_ASPECT']
+        self.assertEqual(row['DefaultValue'], '')
+        self.assertIn('', row['Values'])
+        self.assertIn('0', row['Values'])
+        self.assertNotIn('display', row['Values'])
+        self.assertEqual(len(row['Values']), len(row['Titles']))
+
     def test_scene_values_are_sizes(self):
         # build_ipa.py embeds one of these sizes in the exported patch, and main.m rejects a stored value the row does
         # not list; both parse <width>x<height>.

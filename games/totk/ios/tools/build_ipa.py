@@ -11,7 +11,7 @@ from xcode_dir import developer_dir
 # HD switch and MetalFX. Breath of the Wild's pane keeps the rows both games share (language, frame rate, overlays,
 # controllers, keyboard, saves, debug); tests/test_ios_packaging.py checks that each row here is gone from its pane.
 TOTK_ONLY_SETTING_KEYS = ('TOTK_DOCKED', 'TOTK_CUSTOM_PICTURE', 'TOTK_IOS_PICTURE_MODE', 'TOTK_RENDER_RES',
-                          'TOTK_FPS_CAP', 'TOTK_MFX_UPSCALE', 'TOTK_TAA')
+                          'TOTK_FPS_CAP', 'TOTK_MFX_UPSCALE', 'TOTK_TAA', 'TOTK_ASPECT')
 
 def settings_without_totk(root):
     """The pane for Breath of the Wild, in place: the Tears-of-the-Kingdom-only rows, and any group they leave empty."""

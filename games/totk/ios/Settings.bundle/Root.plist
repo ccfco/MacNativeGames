@@ -76,6 +76,36 @@
 			<key>Type</key>
 			<string>PSGroupSpecifier</string>
 			<key>Title</key>
+			<string>画面比例 · Aspect ratio</string>
+			<key>FooterText</key>
+			<string>与预设、自定义无关，两种模式下都生效 · independent of the presets and the custom layer; applies in both</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSRadioGroupSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_ASPECT</string>
+			<key>Title</key>
+			<string>画面比例 · Aspect ratio</string>
+			<key>DefaultValue</key>
+			<string></string>
+			<key>Values</key>
+			<array>
+				<string></string>
+				<string>0</string>
+			</array>
+			<key>Titles</key>
+			<array>
+				<string>填满屏幕（按屏幕比例取景）· Fill the screen</string>
+				<string>16:9（黑边）· 16:9 letterbox</string>
+			</array>
+			<key>FooterText</key>
+			<string>填满屏幕不拉伸画面：相机按屏幕比例取景，呈现时再还原比例。iPad 比 16:9 窄，所以两侧会少一点、上下填满；16:9 保留完整宽度并加黑边。部分 UI 特效可能随取景偏移 · fill does not stretch: the camera takes the screen's aspect and the present pass restores the proportions. An iPad is narrower than 16:9, so a little is lost at the sides and the height is filled; 16:9 keeps the full width with bars. A few UI effects may sit off with a wider view</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+			<key>Title</key>
 			<string>幀率 · Frame rate</string>
 			<key>FooterText</key>
 			<string>鎖 30 幀畫面更穩、手機更涼；遊戲中也可以點觸控按鍵中間的 60 / 30 切換 · 30 is steadier and keeps the phone cooler; the 60 / 30 button between − and + of the touch controls switches it while playing</string>

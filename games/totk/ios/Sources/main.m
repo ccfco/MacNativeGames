@@ -245,7 +245,7 @@ static void apply_settings(void) {
     /* The pane's picture and frame rows describe a phone or tablet display. On visionOS the platform's own defaults
        (didFinishLaunching, below) own those keys: the window is not a 60 Hz panel, and its scene size comes from the
        headset rather than from a phone's list. Handing the pane's values over would silently replace them. */
-    for (NSString *key in @[@"TOTK_IOS_PICTURE_MODE", @"TOTK_IOS_DRAWABLE_H", @"TOTK_RENDER_RES",
+    for (NSString *key in @[@"TOTK_IOS_PICTURE_MODE", @"TOTK_IOS_DRAWABLE_H", @"TOTK_RENDER_RES", @"TOTK_ASPECT",
                             @"TOTK_MFX_UPSCALE", @"TOTK_TAA", @"TOTK_FPS_CAP", @"TOTK_FPS_OVERLAY", @"TOTK_SHADER_OVERLAY",
                             @"TOTK_DOCKED", @"TOTK_PHONE_FPS", @"TOTK_CUSTOM_PICTURE"])
         [defaults removeObjectForKey:key];
