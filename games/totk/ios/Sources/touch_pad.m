@@ -215,9 +215,9 @@ static void draw_stick(CGContextRef c, CGPoint o, CGPoint p, CGFloat r) {
     CGPoint f = self.fpsButton; CGRect box = CGRectMake(f.x - kFpsButtonSize / 2, f.y - kFpsButtonSize / 2, kFpsButtonSize, kFpsButtonSize);
     UIBezierPath *key = [UIBezierPath bezierPathWithRoundedRect:box cornerRadius:8];
     CGContextSetFillColorWithColor(c, fill); [key fill]; [key stroke];
-    BOOL custom = [NSUserDefaults.standardUserDefaults boolForKey:@"TOTK_CUSTOM_PICTURE"];
-    NSString *rate = runtime_phone_fps() == 30 ? @"30"
-                   : custom ? ([NSUserDefaults.standardUserDefaults stringForKey:@"TOTK_FPS_CAP"] ?: @"60") : @"60";
+    /* The runtime only knows "held at 30" or not, so the label shows that state: after a tap that lifts the pane's cap
+       it agrees with the pacing instead of repeating the stale pane value. */
+    NSString *rate = runtime_phone_fps() == 30 ? @"30" : @"60";
     NSDictionary *small = @{NSFontAttributeName: [UIFont monospacedDigitSystemFontOfSize:13 weight:UIFontWeightSemibold], NSForegroundColorAttributeName: ink};
     CGSize z = [rate sizeWithAttributes:small]; [rate drawAtPoint:CGPointMake(f.x - z.width / 2, f.y - z.height / 2) withAttributes:small];
 }

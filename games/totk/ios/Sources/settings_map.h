@@ -10,6 +10,7 @@ typedef struct {
     const char *drawable;        /* TOTK_IOS_DRAWABLE_H: rows, "0" = the panel's native pixels */
     const char *output_upscale;  /* TOTK_MFX_OUTPUT: MetalFX spatial scaling of the canvas into the drawable */
     const char *operation;       /* TOTK_OPERATION_MODE: "handheld" or "docked" (the 1080 mode uses the docked settings) */
+    const char *scene_upscale;   /* TOTK_MFX_UPSCALE: "1" forces it on (the output upscale needs it); NULL keeps the pane's switch */
 } totk_picture_env;
 
 typedef struct {
@@ -27,7 +28,8 @@ typedef struct {
 
 /* mode is one of the pane's picture values; 0 when it is not (out is untouched). */
 int totk_picture_env_build(const char *mode, totk_picture_env *out);
-/* cap is "30", "60" or "120". 0 when cap is not a pane value (out is untouched). */
+/* cap is "30" or "60". 0 when cap is not a pane value (out is untouched). The iOS display link is fixed at 60 Hz, so
+   there is no higher entry: the uncapped path could never show more than 60 either. */
 int totk_frame_env_build(const char *cap, totk_frame_env *out);
 /* docked: the pane's Full HD switch. Always succeeds. */
 int totk_preset_env_build(int docked, totk_preset_env *out);

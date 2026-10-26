@@ -1,13 +1,15 @@
 #include "settings_map.h"
 #include <string.h>
 
-/* The picture mode owns the drawable and the output upscale: the game renders into a 1920x1080 canvas, and the mode
-   either matches the drawable to that canvas (720 or 1080 rows) or hands the canvas to MetalFX and lets it fill the
-   panel's own pixels. The 1080 mode uses the game's docked settings, as the pane's Full HD preset does. */
+/* The picture mode owns the drawable, the output upscale and the operation: the game renders into a canvas, and the
+   mode either matches the drawable to it (720 or 1080 rows) or hands the canvas to MetalFX and lets it fill the panel's
+   own pixels. The 1080 mode uses the game's docked settings, as the pane's Full HD preset does. The output upscale only
+   runs while the scene upscale's master switch is on, so the MetalFX entry turns that switch on itself: a pane switch
+   left off would otherwise make the entry do nothing. */
 static const struct { const char *mode; totk_picture_env env; } PICTURE[] = {
-    {"720",  {"720",  "0", "handheld"}},
-    {"1080", {"1080", "0", "docked"}},
-    {"mfx",  {"0",    "1", "handheld"}},
+    {"720",  {"720",  "0", "handheld", NULL}},
+    {"1080", {"1080", "0", "docked",   NULL}},
+    {"mfx",  {"0",    "1", "handheld", "1"}},
 };
 
 int totk_picture_env_build(const char *mode, totk_picture_env *out) {
@@ -23,15 +25,13 @@ int totk_picture_env_build(const char *mode, totk_picture_env *out) {
 /* A cap is a demand on the display: 60 paces it through DM_PRESENT_HZ, 30 is the phone's own hold
    (TOTK_PHONE_FPS), which keeps the game's frame interval in display units; pacing the clock at 30 Hz instead raised
    the game's interval to 3 display units and the title ran at about 10 fps (hle_nvn.c phone_holds_30).
-   120 leaves the pacing alone: the iOS default is the uncapped path, whose ceiling is the display's own rate (120 on a
-   ProMotion iPad, 60 elsewhere). Setting DM_PRESENT_HZ=120 would turn that path off, and the app's own frame pacing
-   does not reach above the refresh rate anyway. */
+   The iOS display link is fixed at 60 Hz (frontend_ios.m TOTK_IOS_LINK_HZ), so there is no entry above 60: the uncapped
+   path is capped at 60 by the link anyway. */
 int totk_frame_env_build(const char *cap, totk_frame_env *out) {
     if (!cap) return 0;
     totk_frame_env e;
     if (!strcmp(cap, "30")) e = (totk_frame_env){NULL, "30"};
     else if (!strcmp(cap, "60")) e = (totk_frame_env){"60", NULL};
-    else if (!strcmp(cap, "120")) e = (totk_frame_env){NULL, NULL};
     else return 0;
     *out = e;
     return 1;
@@ -56,14 +56,12 @@ int totk_preset_frame_env_build(const char *fps, totk_frame_env *out) {
     return 1;
 }
 
-/* The keys the pane's layers own. Every other pane row is handed over whichever layer is active.
-   TOTK_IOS_DRAWABLE_H has no row any more (the picture mode replaced it), but a device that ran an earlier panel still
-   stores it: ALWAYS would hand that stale height over before the preset's docked 1080 and, overwrite=0, keep it. */
+/* The keys the pane's layers own. Every other pane row is handed over whichever layer is active. Only keys that have a
+   row can appear here: main.m's loop walks the pane's own specs, so a key without one is never handed over at all. */
 static const struct { const char *key; totk_key_layer layer; } LAYERS[] = {
     {"TOTK_DOCKED",           TOTK_KEY_PRESET},
     {"TOTK_PHONE_FPS",        TOTK_KEY_PRESET},
     {"TOTK_IOS_PICTURE_MODE", TOTK_KEY_CUSTOM},
-    {"TOTK_IOS_DRAWABLE_H",   TOTK_KEY_CUSTOM},
     {"TOTK_RENDER_RES",       TOTK_KEY_CUSTOM},
     {"TOTK_FPS_CAP",          TOTK_KEY_CUSTOM},
 };

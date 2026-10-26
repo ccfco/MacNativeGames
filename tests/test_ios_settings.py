@@ -81,8 +81,7 @@ class IOSSettings(unittest.TestCase):
         # The key -> layer table is the one main.m filters by; a row that moves layers without the table following it
         # would be handed over (or dropped) by the wrong layer.
         for key, layer in {'TOTK_DOCKED': 'preset', 'TOTK_PHONE_FPS': 'preset',
-                           'TOTK_IOS_PICTURE_MODE': 'custom', 'TOTK_IOS_DRAWABLE_H': 'custom',
-                           'TOTK_RENDER_RES': 'custom',
+                           'TOTK_IOS_PICTURE_MODE': 'custom', 'TOTK_RENDER_RES': 'custom',
                            'TOTK_FPS_CAP': 'custom', 'TOTK_FPS_OVERLAY': 'always'}.items():
             with self.subTest(key=key, layer=layer):
                 run = subprocess.run([str(executable), '--layer', key], capture_output=True, text=True)

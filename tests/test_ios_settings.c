@@ -4,16 +4,20 @@
 #include <string.h>
 
 static int failures;
+static int wants(const char *got, const char *want);
 
-static void picture(const char *mode, const char *drawable, const char *output, const char *operation) {
+static void picture(const char *mode, const char *drawable, const char *output, const char *operation,
+                    const char *scene_upscale) {
     totk_picture_env e;
     if (!totk_picture_env_build(mode, &e)) {
         failures++; fprintf(stderr, "picture %s: not accepted\n", mode); return;
     }
-    if (strcmp(e.drawable, drawable) || strcmp(e.output_upscale, output) || strcmp(e.operation, operation)) {
+    if (strcmp(e.drawable, drawable) || strcmp(e.output_upscale, output) || strcmp(e.operation, operation) ||
+        wants(e.scene_upscale, scene_upscale)) {
         failures++;
-        fprintf(stderr, "picture %s: %s/%s/%s, want %s/%s/%s\n", mode, e.drawable, e.output_upscale, e.operation,
-                drawable, output, operation);
+        fprintf(stderr, "picture %s: %s/%s/%s/%s, want %s/%s/%s/%s\n", mode, e.drawable, e.output_upscale, e.operation,
+                e.scene_upscale ? e.scene_upscale : "(unset)", drawable, output, operation,
+                scene_upscale ? scene_upscale : "(unset)");
     }
 }
 
@@ -64,8 +68,7 @@ static int picture_accepts(const char *mode) {
 
 static int frame_cap_accepts(const char *cap) {
     totk_frame_env e;
-    /* 120 is a pane value whose mapping is "no override": the uncapped path already runs up to the display's rate. */
-    return totk_frame_env_build(cap, &e) && (e.present_hz || e.phone_fps || !strcmp(cap, "120"));
+    return totk_frame_env_build(cap, &e);
 }
 
 static int preset_frame_accepts(const char *fps) {
@@ -103,21 +106,20 @@ int main(int argc, char **argv) {
         return 2;
     }
     /* The custom layer: the picture mode owns the drawable, the output upscale and the operation mode (1080 runs the
-       game's docked settings); the scene upscale is the pane's own switch. */
-    picture("720", "720", "0", "handheld");
-    picture("1080", "1080", "0", "docked");
-    picture("mfx", "0", "1", "handheld");
-    totk_picture_env p = {"keep", "keep", "keep"};
+       game's docked settings); the MetalFX entry also forces the scene upscale on, which the output upscale needs. */
+    picture("720", "720", "0", "handheld", NULL);
+    picture("1080", "1080", "0", "docked", NULL);
+    picture("mfx", "0", "1", "handheld", "1");
+    totk_picture_env p = {"keep", "keep", "keep", "keep"};
     if (totk_picture_env_build("custom", &p) || totk_picture_env_build(NULL, &p) ||
         totk_picture_env_build("", &p) || strcmp(p.drawable, "keep") || strcmp(p.operation, "keep")) {
         failures++; fprintf(stderr, "unknown picture modes must be rejected without touching the result\n");
     }
 
-    /* 30 is the phone's own hold, 60 paces the display link, 120 leaves the pacing to the uncapped path (the
-       display's own rate). */
+    /* 30 is the phone's own hold, 60 paces the display link; the iOS link itself is fixed at 60 Hz, so nothing above
+       60 exists. */
     frame("30", NULL, "30");
     frame("60", "60", NULL);
-    frame("120", NULL, NULL);
     totk_frame_env f = {"keep", "keep"};
     if (totk_frame_env_build("90", &f) || totk_frame_env_build(NULL, &f) || strcmp(f.present_hz, "keep")) {
         failures++; fprintf(stderr, "unknown frame caps must be rejected without touching the result\n");
@@ -138,9 +140,10 @@ int main(int argc, char **argv) {
        over in both layers. */
     if (totk_key_layer_of("TOTK_DOCKED") != TOTK_KEY_PRESET || totk_key_layer_of("TOTK_PHONE_FPS") != TOTK_KEY_PRESET ||
         totk_key_layer_of("TOTK_IOS_PICTURE_MODE") != TOTK_KEY_CUSTOM || totk_key_layer_of("TOTK_RENDER_RES") != TOTK_KEY_CUSTOM ||
-        totk_key_layer_of("TOTK_IOS_DRAWABLE_H") != TOTK_KEY_CUSTOM ||
         totk_key_layer_of("TOTK_FPS_CAP") != TOTK_KEY_CUSTOM || totk_key_layer_of("TOTK_FPS_OVERLAY") != TOTK_KEY_ALWAYS ||
-        totk_key_layer_of(NULL) != TOTK_KEY_ALWAYS) {
+        totk_key_layer_of(NULL) != TOTK_KEY_ALWAYS || totk_key_layer_of("TOTK_IOS_DRAWABLE_H") != TOTK_KEY_ALWAYS) {
+        /* A key without a pane row is never handed over, so it must not claim a layer; DRAWABLE_H is the one such key
+           with a history (the picture mode replaced its row). */
         failures++; fprintf(stderr, "the key -> layer table is not what main.m and the tests expect\n");
     }
     /* The in-game button: the preset layer saves 30 / 60 in its own row; the custom layer leaves the pane's cap alone. */
