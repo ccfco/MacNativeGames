@@ -182,3 +182,28 @@ and nothing outside `games/ssbu` is read.
   menu (applies to the next photo; Show in Finder opens it). One folder chooser now serves the DLC and Photos menus.
   Measured: two photos without a crash, then a photo saved as a 1280x720 PNG without alpha, colours checked by eye
   against the game.
+
+### 2026-10-27: 13.0.5
+
+- **What 13.0.5 changes.** The final update (1 September 2026: invalid data in online battles). Of the five ExeFS
+  modules only `main` and `main.npdm` differ: rtld, sdk (SDK 8.2.1) and subsdk0 are 13.0.2's byte for byte, and so are
+  their rewrites. The NRRs from `cross2_130001` to `cross2_130004` list the same 98 NRO modules, so the fighters,
+  stages and modes are 13.0.2's too; the RomFS has 15 files (13.0.2: 12, the three new NRRs).
+- **Which version.** `build_ssbu.py` extracts the update's ExeFS once and takes the version whose hashes it carries
+  (`identify_update`, as `build_app.py` does), never the file name; each version's files stay apart in the work folder
+  (`extracted/v1305`, `rewritten/v1305`). The Makefile's `VERSION` builds the runtime for one (`-DSSBU_GAME_V1305`,
+  `runtime/game_version.h`), and before the first start of 13.0.5 the launcher keeps the saves as
+  `profile-before-13.0.5`, as Tears of the Kingdom's updates do.
+- **Pins.** `assets/expected-v13.0.5.json`, from a base NSP and the 13.0.5 update NSP: the ExeFS from `extract_code.py`,
+  the RomFS from `merge_romfs.py` (all six IVFC levels), the rewrites from `patch_nso.py` (sdk and subsdk0 reproduce the
+  13.0.2 pins).
+- **2K.** 13.0.5's `main` has 0x9b0 bytes more code before main+0x35b407c: the 26 render size sites from there on sit
+  0x9b0 later with the same words (every sequence of two or more instructions occurs in the 13.0.5 image only at the
+  sites, and every single-instruction site matches at that shift). The UI factor sites at main+0x1534e18 / 0x153c348
+  stay, but rodata moved a page, so their adrp words name the next page (`RES_SHIFT`, `J1_X11` ... in
+  `game_patches.c`). Built as 13.0.2, `game_patches.c` and the launcher compile to the same machine code as before
+  (disassembly and strings compared). `SSBU_UI_LOG` and `SSBU_VP_LOG` keep 13.0.2's addresses and say so on 13.0.5.
+  Measured: the start in 2K, groups ABCDEGHIJ, 55 instructions, 372 viewports scaled and 38 kept.
+- **Played** on an Apple M5, 32 GB, macOS 27.2: matches in a 3420x1916 window, with MetalFX upscaling (key 3) on and
+  off. Presentation p50 and p95 16.67 ms at 60 Hz; after the first seconds of warm-up at most 0.8 % of the frames one
+  refresh late. `gap_report.py`: three warnings the graphics layer already handles (`hle_nvn.c`, `nvn_mtl.m`), no abort.

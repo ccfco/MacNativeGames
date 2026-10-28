@@ -104,7 +104,9 @@ static NSString *par_hash(const void *bytes, size_t n) {
    other programs. Removed: the folders that appeared while this program's batches were open (par_batch_begin / _end). */
 static pthread_mutex_t g_par_wmu = PTHREAD_MUTEX_INITIALIZER;
 static _Atomic uint64_t g_par_ga_removed;
+static NSArray<NSDictionary *> *g_par_probe_ga_dirs;   // native archive probe only: isolated owned/shared folders
 static NSArray<NSDictionary *> *par_ga_dirs(void) {   // @{path, own}
+    if (g_par_probe_ga_dirs) return g_par_probe_ga_dirs;
     static NSArray *dirs; static dispatch_once_t once;
     dispatch_once(&once, ^{
         NSMutableArray *bases = [NSMutableArray array];
@@ -139,6 +141,18 @@ static void par_ga_remove_new(NSSet<NSString *> *before) {
         else { static _Atomic int said; if (atomic_fetch_add(&said, 1) < 4) MLOG("【红】管线存档：删不掉 Metal 留下的工作目录 %s（%s）", path.UTF8String, e.localizedDescription.UTF8String); }
     }
 }
+static int g_par_startup_cleaned;   // g_par_wmu; startup deletion must never run again while batches are open
+static void par_ga_cleanup_startup(void) {
+    pthread_mutex_lock(&g_par_wmu);
+    if (g_par_startup_cleaned) { pthread_mutex_unlock(&g_par_wmu); return; }
+    NSUInteger n = 0;
+    for (NSString *path in par_ga_list(1)) if ([NSFileManager.defaultManager removeItemAtPath:path error:nil]) n++;
+    g_par_startup_cleaned = 1;
+    pthread_mutex_unlock(&g_par_wmu);
+    NSMutableArray *where = [NSMutableArray array];
+    for (NSDictionary *d in par_ga_dirs()) [where addObject:[NSString stringWithFormat:@"%@（%@）", d[@"path"], [d[@"own"] boolValue] ? @"本 App 的" : @"共用"]];
+    MLOG("管线存档：Metal 的工作目录查这些：%s；启动时删掉以前留下的 %lu 个", [where componentsJoinedByString:@"，"].UTF8String, (unsigned long)n);
+}
 /* The keys of the files in the folder (g_par_have, g_par_where); removes what a write cut short left. Returns the files' bytes. */
 static uint64_t par_load_dir(NSUInteger *files) {
     NSFileManager *fm = NSFileManager.defaultManager;
@@ -163,17 +177,9 @@ static void par_open_dir(id<MTLDevice> dev) {
     dispatch_once(&once, ^{
         if (!par_enabled()) return;
         NSFileManager *fm = NSFileManager.defaultManager;
-        /* The app's own folders (under its bundle id) hold only build folders left by earlier runs (a crash in a write;
-           before par_ga_remove_new, every write). Removed in the background, holding the write lock so no write is under
-           way. Shared folders (a bare binary's) keep everything but what par_write itself made. */
-        dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-            pthread_mutex_lock(&g_par_wmu); NSUInteger n = 0;
-            for (NSString *path in par_ga_list(1)) if ([NSFileManager.defaultManager removeItemAtPath:path error:nil]) n++;
-            pthread_mutex_unlock(&g_par_wmu);
-            NSMutableArray *where = [NSMutableArray array];
-            for (NSDictionary *d in par_ga_dirs()) [where addObject:[NSString stringWithFormat:@"%@（%@）", d[@"path"], [d[@"own"] boolValue] ? @"本 App 的" : @"共用"]];
-            MLOG("管线存档：Metal 的工作目录查这些：%s；启动时删掉以前留下的 %lu 个", [where componentsJoinedByString:@"，"].UTF8String, (unsigned long)n);
-        });
+        /* Only earlier runs' owned folders may be removed. Finish before dispatch_once publishes the archive to any
+           writer: batches no longer hold g_par_wmu while Metal uses their build folders. Shared folders stay intact. */
+        par_ga_cleanup_startup();
         NSString *stamp_path = [par_dir() stringByAppendingPathComponent:@"identity.json"];
         NSData *sd = [NSData dataWithContentsOfFile:stamp_path];
         NSDictionary *stamp = sd ? [NSJSONSerialization JSONObjectWithData:sd options:0 error:nil] : nil;

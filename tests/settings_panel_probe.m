@@ -31,6 +31,20 @@ void runtime_mouse_move(double dx, double dy) { (void)dx; (void)dy; }
 void runtime_mouse_button(int button, int down) { (void)button; (void)down; }
 void runtime_mouse_release(void) {}
 void runtime_gamepad_clear(void) {}
+static char savedName[64], savedWord[16];
+void runtime_setting_save(const char *name, const char *word, const char *what) {
+    (void)what; snprintf(savedName, sizeof savedName, "%s", name); snprintf(savedWord, sizeof savedWord, "%s", word);
+    const char *dir = getenv("SETTINGS_TEST_DIR"); if (!dir) return;
+    char path[4096]; snprintf(path, sizeof path, "%s/%s", dir, name);
+    FILE *f = fopen(path, "w"); assert(f); assert(fprintf(f, "%s\n", word) > 0); assert(!fclose(f));
+}
+int runtime_setting_word(const char *name, char *word, size_t size) {
+    const char *dir = getenv("SETTINGS_TEST_DIR"); if (!dir) return 0;
+    char path[4096]; snprintf(path, sizeof path, "%s/%s", dir, name); FILE *f = fopen(path, "r"); if (!f) return 0;
+    size_t n = fread(word, 1, size - 1, f); word[n] = 0; fclose(f); return 1;
+}
+static int fakeSettingsCapture;
+void runtime_gamepad_text_capture(int on) { fakeSettingsCapture = !!on; }
 /* runtime/hid_feedback.c's and gamepad_feedback.m's rumble, strength and gyro switches without a controller. */
 static int fakeFeedback[2] = {1, 1}, fakeFeedbackLocked[2], fakeFeedbackPresent[2] = {1, 1}, fakeGainLocked;
 static float fakeGain = 1;
@@ -43,7 +57,7 @@ float runtime_rumble_gain(void) { return fakeGain; }
 void runtime_rumble_gain_set(float gain) { fakeGain = gain; }
 /* gfx/nvn/hle_nvn.c's frame lock (its pacing is checked by probe-gfx's present-interval probe). */
 static int fakeLock;
-void nvn_fps_lock_set(int fps) { fakeLock = fps == 30 || fps == 40 || fps == 60 ? fps : 0; }
+void nvn_fps_lock_set(int fps) { if (totk_fps_limit_valid(fps)) fakeLock = fps; }
 int nvn_fps_lock(void) { return fakeLock; }
 /* runtime/gamepad_feedback.m's DualSense bow trigger switch without a controller. */
 static int fakeTriggers = 1, fakeTriggersLocked, fakeTriggersAvailable = 1;
@@ -51,6 +65,7 @@ int runtime_triggers_available(void) { return fakeTriggersAvailable; }
 int runtime_triggers_locked(void) { return fakeTriggersLocked; }
 int runtime_triggers_choice(void) { return fakeTriggers; }
 void runtime_triggers_choose(int on) { fakeTriggers = !!on; }
+void runtime_triggers_release(void) {}
 /* A window key is the user's input (runtime/input.c user_input): it stops a survey and an auto-load, neither here. */
 void runtime_survey_cancel_user(void) {}
 void runtime_autoload_user_input(void) {}
@@ -100,34 +115,123 @@ static void shaped(double ratio) {
 }
 static BOOL switched(NSString *title) { [settingsPanel.timer fire]; return ((NSSwitch *)row(title).control).state == NSControlStateValueOn; }
 
+static void persistence_probe(const char *action) {
+    window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 1280, 720) styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:NO];
+    window.contentView = [[TOTKInputView alloc] initWithFrame:NSMakeRect(0, 0, 1280, 720)];
+    if (!strcmp(action, "save")) {
+        settings_test_output_init(); settings_test_aspect_init(16.0 / 9); settingsPanel = [TOTKSettingsPanel new];
+        pick(@"Overlay", @"FPS + playtime"); pick(@"Frame interpolation", @"40+40");
+        pick(@"Resolution", @"2K (2560×1440)"); pick(@"Aspect ratio", @"21:9"); flip(@"Edge smoothing", YES);
+        assert(fakeLock == 0 && mfx_requested() == MFX_40); return;
+    }
+    settings_restore_begin();
+    if (!strcmp(action, "corrupt")) {
+        assert(settingsPendingOutput == -1 && settingsPendingAspect == 0 && fakeLock == 0 && mfx_requested() == MFX_OFF);
+        assert(fps_overlay_hud_mode() == HUD_MODE_ALL && !taa_enabled()); return;
+    }
+    assert(fps_overlay_hud_mode() == HUD_MODE_MINIMAL);
+    if (!strcmp(action, "override")) {
+        assert(settingsPendingOutput == -1 && settingsPendingAspect == 0 && mfx_requested() == MFX_MAX && !taa_enabled()); return;
+    }
+    if (!strcmp(action, "lock")) { assert(fakeLock == 60 && mfx_requested() == MFX_OFF); return; }
+    assert(fakeLock == 0 && mfx_requested() == MFX_40 && taa_enabled());
+    assert(settingsPendingOutput == OUTPUT_MODE_NATIVE && settingsPendingAspect > 2.3f);
+    settings_restore_ready(); assert(settingsPendingOutput == OUTPUT_MODE_NATIVE && settingsPendingAspect > 2.3f);
+    settings_test_output_init(); settings_test_aspect_init(16.0 / 9); settings_restore_ready();
+    assert(settingsPendingOutput == -1 && settingsPendingAspect == 0);
+    assert(runtime_output_mode() == OUTPUT_MODE_NATIVE && fabsf(runtime_aspect_ratio() - 21.0f / 9) < 0.001f);
+}
+
+/* Only row models and settings functions: no NSApplication, window or GPU. */
+static TOTKSettingRow *frame_row(NSString *title) {
+    for (TOTKSettingRow *r in settings_rows()) if ([r.title isEqualToString:title]) return r;
+    abort();
+}
+static void frame_probe(void) {
+    assert(getenv("SETTINGS_TEST_DIR"));
+    unsetenv("TOTK_MFX");
+    TOTKSettingRow *lock=frame_row(@"Frame lock"), *interp=frame_row(@"Frame interpolation (MetalFX)");
+    assert(([lock.values isEqualToArray:@[@0,@30,@40,@60,@72,@90,@120]] && lock.set));
+    assert(fakeLock==0); settings_restore_begin(); assert(fakeLock==0);
+    const int rates[]={0,30,40,60,72,90,120};
+    for(unsigned i=0;i<sizeof rates/sizeof *rates;i++){
+        int fps=rates[i]; char expected[32];
+        if(fps)snprintf(expected,sizeof expected,"lock-%d",fps);else strcpy(expected,"off");
+        mfx_set(MFX_OFF); lock.set(fps);
+        assert(fakeLock==fps && mfx_requested()==MFX_OFF);
+        assert(!strcmp(savedName,"graphics-frame.txt") && !strcmp(savedWord,expected));
+        fakeLock=0; settings_restore_begin(); assert(fakeLock==fps && mfx_requested()==MFX_OFF);
+    }
+    lock.set(72); interp.set(MFX_40);
+    assert(fakeLock==0 && mfx_requested()==MFX_40 && !strcmp(savedWord,"interp-2"));
+    mfx_set(MFX_OFF); settings_restore_begin(); assert(fakeLock==0 && mfx_requested()==MFX_40);
+    lock.set(90); assert(mfx_requested()==MFX_OFF && !strcmp(savedWord,"lock-90"));
+    interp.set(MFX_30); interp.set(MFX_OFF);
+    assert(fakeLock==0 && !strcmp(savedWord,"off"));
+    lock.set(120);
+    for(unsigned i=0;i<2;i++){
+        setenv("TOTK_MFX",i?"interpmax":"0",1);fakeLock=0;mfx_set(i?MFX_MAX:MFX_OFF);
+        settings_restore_begin();
+        assert(fakeLock==0 && mfx_requested()==(i?MFX_MAX:MFX_OFF));
+        assert(!frame_row(@"Frame lock").set);
+        char word[32]; assert(runtime_setting_word("graphics-frame.txt",word,sizeof word) && !strcmp(word,"lock-120\n"));
+    }
+    unsetenv("TOTK_MFX");mfx_set(MFX_OFF);
+    const char *bad[]={"lock-0","lock-73","lock--1","lock-90junk","lock-120 trailing","invalid"};
+    for(unsigned i=0;i<sizeof bad/sizeof *bad;i++){
+        runtime_setting_save("graphics-frame.txt",bad[i],"test");fakeLock=0;settings_restore_begin();assert(fakeLock==0);
+    }
+    runtime_setting_save("graphics-frame.txt","lock-72  ","test");settings_restore_begin();assert(fakeLock==72);
+    runtime_input_key_synthetic(25,1);runtime_input_key_synthetic(25,0);assert(fakeLock==72); /* key 9 is unassigned */
+    NSString *path=[@(getenv("SETTINGS_TEST_DIR")) stringByAppendingPathComponent:@"graphics-frame.txt"];
+    assert([NSFileManager.defaultManager removeItemAtPath:path error:nil]);fakeLock=0;settings_restore_begin();assert(fakeLock==0);
+    unsetenv("SETTINGS_TEST_DIR");lock.set(90); /* no directory: no player file is written */
+    puts("pass: frame lock choices, shared persistence, interpolation, overrides, invalid/deleted files, key 9 inert");
+}
+
 int main(int argc, const char **argv) { @autoreleasepool {
+    if (argc==2 && !strcmp(argv[1],"frame")) { frame_probe(); return 0; }
     [NSApplication sharedApplication];
+    if (argc == 2) { persistence_probe(argv[1]); puts("pass: settings persistence"); return 0; }
+    unsetenv("TOTK_MFX"); /* priority/disabled row covered by the headless frame probe */
     setenv("TOTK_OUTPUT_RES", "2560x1440", 1);   /* the native size the resolution row names */
     settings_test_output_init();
+    // In-memory fixture only: do not start the timer or touch a player's profile.
+    playtime=[[TOTKPlaytime alloc] initWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString]];
     window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 1280, 720) styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:NO];
     window.contentView = [[TOTKInputView alloc] initWithFrame:NSMakeRect(0, 0, 1280, 720)];
     if (hud_compact()) { TOTKHudBox *box = [[TOTKHudBox alloc] initWithFrame:NSZeroRect]; [window.contentView addSubview:box]; hudBox = box; }
 
     /* Key 1 opens it; a held key acts once. */
     runtime_input_key_synthetic(18, 1); runtime_input_key_synthetic(18, 1); tick(); runtime_input_key_synthetic(18, 0); tick();
-    assert(settingsOpen && settingsPanel && !settingsPanel.hidden && settingsPanel.superview == window.contentView);
+    assert(settingsOpen && fakeSettingsCapture && settingsPanel && !settingsPanel.hidden && settingsPanel.superview == window.contentView);
     assert(NSContainsRect(window.contentView.bounds, settingsPanel.frame));
-    assert(settingsPanel.rows.count == 12);
+    assert(settingsPanel.rows.count == 13);
 
-    /* Overlay: all -> FPS only -> off; the corner box follows. */
+    /* FPS graph: a switch, off at start, kept in fps-graph.txt. */
+    assert(!switched(@"FPS graph"));
+    flip(@"FPS graph", YES); assert(fpsGraphEnabled && !strcmp(savedName, "fps-graph.txt") && !strcmp(savedWord, "on"));
+    flip(@"FPS graph", NO); assert(!fpsGraphEnabled && !strcmp(savedWord, "off"));
+
+    /* Overlay: all -> FPS + playtime -> off; the corner box follows. */
     hud_publish(HUD_FPS, "FPS 60  2560x1440", 0); hud_publish(HUD_SHADER, "New shaders 3 / total 9", 0);
-    shows(@"Overlay", @"All (FPS, shaders, load)");
-    pick(@"Overlay", @"FPS only"); assert(fps_overlay_hud_mode() == HUD_MODE_MINIMAL);
-    if (hudBox) { TOTKHudBox *b = (TOTKHudBox *)hudBox; assert(!b.hidden && [b.label.stringValue isEqualToString:@"FPS 60  2560x1440"]); }
+    shows(@"Overlay", @"All (FPS, shaders, load, playtime)");
+    pick(@"Overlay", @"FPS + playtime"); assert(fps_overlay_hud_mode() == HUD_MODE_MINIMAL);
+    if (hudBox) { TOTKHudBox *b = (TOTKHudBox *)hudBox; assert(!b.hidden && [b.label.stringValue isEqualToString:@"FPS 60  2560x1440\nPlaytime  0 h 00 m"]); }
     pick(@"Overlay", @"Off"); assert(fps_overlay_hud_mode() == HUD_MODE_OFF && (!hudBox || hudBox.hidden));
-    pick(@"Overlay", @"All (FPS, shaders, load)");
+    pick(@"Overlay", @"All (FPS, shaders, load, playtime)");
     if (hudBox) assert(!hudBox.hidden && [((TOTKHudBox *)hudBox).label.stringValue containsString:@"New shaders"]);
+
+    if (hudBox) assert([((TOTKHudBox *)hudBox).label.stringValue containsString:@"Playtime  0 h 00 m"]);
 
     /* Frame lock: off -> 30 -> 60 -> off. */
     shows(@"Frame lock", @"Off");
     pick(@"Frame lock", @"30 fps"); assert(fakeLock == 30);
     pick(@"Frame lock", @"40 fps"); assert(fakeLock == 40);
     pick(@"Frame lock", @"60 fps"); assert(fakeLock == 60);
+    pick(@"Frame lock", @"72 fps"); assert(fakeLock == 72);
+    pick(@"Frame lock", @"90 fps"); assert(fakeLock == 90);
+    pick(@"Frame lock", @"120 fps"); assert(fakeLock == 120);
     pick(@"Frame lock", @"Off"); assert(fakeLock == 0);
     nvn_fps_lock_set(60); shows(@"Frame lock", @"60 fps"); nvn_fps_lock_set(0);
     /* Frame lock and interpolation exclude each other: picking one turns the other off, both rows show it at once. */
@@ -146,7 +250,7 @@ int main(int argc, const char **argv) { @autoreleasepool {
     mfx_set(MFX_MAX); shows(@"Frame interpolation", @"Unlimited");
     pick(@"Frame interpolation", @"40+40"); assert(mfx_requested() == MFX_40);
     pick(@"Frame interpolation", @"50+50"); assert(mfx_requested() == MFX_50);
-    assert(menu(@"Frame interpolation").numberOfItems == 5 && menu(@"Frame lock").numberOfItems == 4);
+    assert(menu(@"Frame interpolation").numberOfItems == 5 && menu(@"Frame lock").numberOfItems == 7);
     pick(@"Frame interpolation", @"Off"); mfx_latch(); assert(!mfx_enabled());
 
     /* Resolution: the player picks; 1080p without MetalFX at the start. */
