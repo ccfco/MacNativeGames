@@ -45,6 +45,7 @@ static const char *const kDirectoryEnvs[] = {"TOTK_PROFILE_DIR", "TOTK_GAME_SLOT
 - (void)syncNow;
 - (void)syncNowWithCompletion:(void (^)(void))completion;
 - (NSUInteger)mirror:(NSURL *)from to:(NSURL *)to overwrite:(BOOL)overwrite;
+- (BOOL)sameContents:(NSURL *)from as:(NSURL *)to;
 - (NSURL *)localDirectory:(NSUInteger)i;
 @end
 
@@ -148,8 +149,8 @@ static const char *const kDirectoryEnvs[] = {"TOTK_PROFILE_DIR", "TOTK_GAME_SLOT
     };
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@(TOTK_UI("存档自动备份", "Save backup"))
                                                                    message:@(TOTK_UI(
-        "选择一个 iCloud Drive 文件夹，存档会自动备份过去。以后删掉这个 App，存档也还在；重装后选中同一个文件夹即可恢复。",
-        "Pick a folder in iCloud Drive; saves are backed up there automatically. They survive deleting this app, and a reinstall restores them from the same folder."))
+        "选择一个文件夹（例如「文件」App 里），存档会自动备份过去。以后删掉这个 App，存档也还在；重装后选中同一个文件夹即可恢复。",
+        "Pick a folder (for example in the Files app); saves are backed up there automatically. They survive deleting this app, and a reinstall restores them from the same folder."))
                                                             preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@(TOTK_UI("选择文件夹", "Choose folder")) style:UIAlertActionStyleDefault
                                             handler:^(UIAlertAction *action) {
@@ -367,22 +368,23 @@ static const char *const kDirectoryEnvs[] = {"TOTK_PROFILE_DIR", "TOTK_GAME_SLOT
     dispatch_async(queue, ^{
         self->stopping = 0;
         NSFileManager *files = NSFileManager.defaultManager;
-        /* 1. Keep what is going to be replaced; if that copy fails, stop while the live save is still in place. */
+        /* 1. Keep what is going to be replaced: a partial copy of it is as bad as none, so the import stops while the
+           live save is still in place unless every file of it was copied. */
         NSURL *keep = [[self documents] URLByAppendingPathComponent:kBeforeImport isDirectory:YES];
         [files removeItemAtURL:keep error:nil];
-        NSUInteger kept = 0;
-        for (NSUInteger i = 0; i < sizeof kDirectories / sizeof *kDirectories; i++)
-            kept += [self mirror:[self localDirectory:i] to:[keep URLByAppendingPathComponent:kDirectories[i] isDirectory:YES] overwrite:YES];
-        if (!kept) {
-            BOOL live = NO;
-            for (NSUInteger i = 0; i < sizeof kDirectories / sizeof *kDirectories; i++)
-                live = live || [[files contentsOfDirectoryAtPath:[[self localDirectory:i] path] error:nil] count] > 0;
-            if (live) {
-                fprintf(stderr, "[totk-save] import aborted: the current save could not be kept\n");
-                if (scoped) [picked stopAccessingSecurityScopedResource];
-                dispatch_async(dispatch_get_main_queue(), done);
-                return;
-            }
+        BOOL keptInFull = YES;
+        for (NSUInteger i = 0; i < sizeof kDirectories / sizeof *kDirectories; i++) {
+            NSURL *live = [self localDirectory:i];
+            NSURL *copy = [keep URLByAppendingPathComponent:kDirectories[i] isDirectory:YES];
+            BOOL liveHasFiles = [[files contentsOfDirectoryAtPath:live.path error:nil] count] > 0;
+            [self mirror:live to:copy overwrite:YES];
+            if (liveHasFiles && ![self sameContents:live as:copy]) keptInFull = NO;
+        }
+        if (!keptInFull) {
+            fprintf(stderr, "[totk-save] import aborted: the current save could not be kept in full\n");
+            if (scoped) [picked stopAccessingSecurityScopedResource];
+            dispatch_async(dispatch_get_main_queue(), done);
+            return;
         }
         /* 2. Copy each folder beside the live one, then swap: the live save is only removed once the import is complete. */
         NSUInteger copied = 0;
@@ -393,8 +395,8 @@ static const char *const kDirectoryEnvs[] = {"TOTK_PROFILE_DIR", "TOTK_GAME_SLOT
             NSURL *temporary = [to URLByAppendingPathExtension:@"import-tmp"];
             [files removeItemAtURL:temporary error:nil];
             NSUInteger n = [self mirror:from to:temporary overwrite:YES];
-            if (!n) {
-                fprintf(stderr, "[totk-save] import of %s failed; the live save is untouched\n", kDirectories[i].UTF8String);
+            if (!n || ![self sameContents:from as:temporary]) {
+                fprintf(stderr, "[totk-save] import of %s is incomplete; the live save is untouched\n", kDirectories[i].UTF8String);
                 [files removeItemAtURL:temporary error:nil];
                 continue;
             }
@@ -499,6 +501,23 @@ static const char *const kDirectoryEnvs[] = {"TOTK_PROFILE_DIR", "TOTK_GAME_SLOT
     });
 }
 
+/* Every file under `from` present under `to` with the same size: a copy that stopped partway (a failure, the background
+   task running out) must not be swapped in as a save. */
+- (BOOL)sameContents:(NSURL *)from as:(NSURL *)to {
+    NSFileManager *files = NSFileManager.defaultManager;
+    BOOL directory = NO;
+    if (![files fileExistsAtPath:from.path isDirectory:&directory]) return YES;   /* nothing to copy */
+    if (!directory) {
+        NSDictionary *source = [files attributesOfItemAtPath:from.path error:nil];
+        NSDictionary *target = [files attributesOfItemAtPath:to.path error:nil];
+        return target && [source[NSFileSize] isEqual:target[NSFileSize]];
+    }
+    NSArray *items = [files contentsOfDirectoryAtURL:from includingPropertiesForKeys:nil options:0 error:nil] ?: @[];
+    if (items.count && ![files fileExistsAtPath:to.path]) return NO;   /* the copy never got as far as making the folder */
+    for (NSURL *item in items)
+        if (![self sameContents:item as:[to URLByAppendingPathComponent:item.lastPathComponent]]) return NO;
+    return YES;
+}
 - (NSUInteger)mirror:(NSURL *)from to:(NSURL *)to overwrite:(BOOL)overwrite {
     if (self->stopping) return 0;
     NSFileManager *files = NSFileManager.defaultManager;
